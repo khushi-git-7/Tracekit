@@ -89,7 +89,6 @@ mock_responses = [
 
 with Client().run(agent="crewai-example") as run, approver(run.client, run.run_id):
     before, after = hooks(run)
-    register_before_tool_call_hook(before)
     register_after_tool_call_hook(after)
 
     agent = Agent(
