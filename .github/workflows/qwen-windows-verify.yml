@@ -50,6 +50,9 @@ jobs:
         start: [cmd, gitbash]
         form: [init, no-exit-tail]
         qwen: ['0.26.5']
+        include:   # the last Qwen Code before a hook's "shell" was read (0.14.5), and the first after (0.15.0)
+          - {start: cmd, form: init, qwen: '0.14.5'}
+          - {start: cmd, form: init, qwen: '0.15.0'}
     runs-on: windows-latest
     timeout-minutes: 25
     defaults:
@@ -118,5 +121,5 @@ jobs:
           Get-Content "$env:RUNNER_TEMP\model.log" -ErrorAction SilentlyContinue
           "--- tracekit last"
           Set-Location $p
-          & "$env:SPACED\Scripts\tracekit.exe" last
-          "tracekit last exit: $LASTEXITCODE"
+          & "$env:SPACED\Scripts\tracekit.exe" last --open
+          "tracekit last --open exit: $LASTEXITCODE"
