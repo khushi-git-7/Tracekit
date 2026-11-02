@@ -1,0 +1,150 @@
+name: kilo-verify
+# Fork-only verification for Tracekit #364. Never part of the PR.
+on:
+  push:
+    branches: ['verify/364-*']
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the release tags from upstream (the fork has none)
+        run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: make install PY=python
+      - name: make lint
+        run: make lint PY=python
+      - name: make test
+        run: make test PY=python
+      - name: make build
+        run: make build PY=python
+      - name: The new tests fail without the change
+        run: |
+          base=ca2126e18f4e1d16320a438060f5c8400c510fa0   # the PR branch's base on upstream main
+          git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git $base
+          git checkout $base -- tracekit/
+          git diff --cached --stat
+          set +e
+          python -m pytest -q -k kilo tests/test_agent_hooks.py tests/test_system_install.py
+          code=$?
+          echo "pytest exit without the change: $code"
+          test $code -eq 1
+
+  kilo:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {case: v1-user, init: 'init --dev --agent kilo', plugin: on}
+          - {case: v1-project, init: 'init --dev --agent kilo --project', plugin: on}
+          - {case: v2-user, init: 'init --dev --v2 --agent kilo', plugin: on}
+          - {case: v1-user-uninstalled, init: 'init --dev --agent kilo', plugin: off}
+          - {case: v2-user-uninstalled, init: 'init --dev --v2 --agent kilo', plugin: off}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      KILO: '7.8.18'
+      PROJ: ${{ github.workspace }}/../proj
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Tracekit
+        run: |
+          python -m pip install -q .
+          tracekit --version
+      - name: Install real Kilo CLI from npm
+        run: |
+          npm install -g "@kilocode/cli@$KILO"
+          kilo --version
+      - name: Point Kilo at a local stub model (no model key)
+        run: |
+          mkdir -p ~/.config/kilo "$PROJ"
+          cat > ~/.config/kilo/kilo.json <<'EOF'
+          {
+            "$schema": "https://app.kilo.ai/config.json",
+            "provider": {
+              "stub": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Stub",
+                "options": {"baseURL": "http://127.0.0.1:8765/v1", "apiKey": "stub"},
+                "models": {"stub-model": {"name": "Stub model", "tool_call": true}}
+              }
+            },
+            "model": "stub/stub-model",
+            "small_model": "stub/stub-model",
+            "permission": {"*": "allow"}
+          }
+          EOF
+          cd "$PROJ" && git init -q && git -c user.name=x -c user.email=x@x commit -q --allow-empty -m init
+      - name: tracekit ${{ matrix.init }}
+        run: |
+          cd "$PROJ"
+          tracekit ${{ matrix.init }}
+          if [ '${{ matrix.plugin }}' = off ]; then
+            # control: the same set-up with Tracekit's plugin taken out again
+            tracekit uninstall --agent kilo
+          fi
+          echo "--- Kilo plugin folders"
+          ls -la ~/.config/kilo/plugin .kilo/plugin 2>&1 || true
+          head -3 ~/.config/kilo/plugin/tracekit.js .kilo/plugin/tracekit.js 2>/dev/null || true
+      - name: tracekit doctor
+        if: matrix.plugin == 'on'
+        run: |
+          cd "$PROJ"
+          tracekit doctor 2>&1 | grep -i -E "kilo|hook|D-" | head -40 || true
+      - name: Real Kilo CLI session against the local stub model
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          python .github/verify364/stub_model.py "$RUNNER_TEMP/model.log" &
+          sleep 1
+          cd "$PROJ"
+          kilo run --auto -m stub/stub-model --print-logs --log-level DEBUG "run the checks" < /dev/null > "$RUNNER_TEMP/kilo.out" 2> "$RUNNER_TEMP/kilo.err"
+          echo "kilo exit: $?"
+      - name: Results
+        if: always()
+        run: |
+          cd "$PROJ"
+          echo "case=${{ matrix.case }} plugin=${{ matrix.plugin }} kilo=$(kilo --version)"
+          echo "denied bash call ran (marker exists): $(test -f denied-marker.txt && echo yes || echo no)"
+          echo "allowed bash call ran (marker exists): $(test -f allowed-marker.txt && echo yes || echo no)"
+          echo "denied background_process call ran (marker exists): $(test -f background-marker.txt && echo yes || echo no)"
+          echo "--- what Kilo sent the stub model after each call (tool results)"
+          cat "$RUNNER_TEMP/model.log" || true
+          echo "--- kilo stdout"
+          cat "$RUNNER_TEMP/kilo.out" || true
+          echo "--- kilo log lines about plugins and tool calls"
+          grep -i -E "plugin|tracekit|tool.execute|blocked" "$RUNNER_TEMP/kilo.err" | cut -c1-400 | head -60 || true
+          echo "--- tracekit last --open"
+          tracekit last --open -o "$RUNNER_TEMP/last.tkb"; echo "exit: $?"
+          echo "--- tracekit last"
+          tracekit last -o "$RUNNER_TEMP/last-closed.tkb"; echo "exit: $?"
+          echo "--- v1 ledger: this run's tool calls and decisions"
+          python - <<'EOF'
+          import glob, json, os
+          for path in glob.glob(os.path.expanduser("~/**/ledger.jsonl"), recursive=True):
+              print(path)
+              for line in open(path, encoding="utf-8"):
+                  e = json.loads(line).get("event") or {}
+                  d = e.get("data") or {}
+                  if e.get("type") == "run.start":
+                      print(" run.start", e.get("run_id"), (d.get("agent") or {}).get("name"))
+                  if e.get("type") in ("tool.call", "policy.decision", "tool.result"):
+                      print(" ", e["type"], d.get("name") or "", d.get("decision") or "", d.get("rule_ids") or "",
+                            json.dumps(d.get("input") or {})[:160])
+          EOF
+          echo "--- v1: tracekit export and verify"
+          tracekit export -o "$RUNNER_TEMP/v1.tkb" && tracekit verify "$RUNNER_TEMP/v1.tkb" || true
