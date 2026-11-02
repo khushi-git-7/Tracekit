@@ -43,11 +43,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {case: v1-user, init: 'init --dev --agent kilo', plugin: on}
-          - {case: v1-project, init: 'init --dev --agent kilo --project', plugin: on}
-          - {case: v2-user, init: 'init --dev --v2 --agent kilo', plugin: on}
-          - {case: v1-user-uninstalled, init: 'init --dev --agent kilo', plugin: off}
-          - {case: v2-user-uninstalled, init: 'init --dev --v2 --agent kilo', plugin: off}
+          - {case: v1-user, init: 'init --dev --agent kilo', plugin: 'on'}
+          - {case: v1-project, init: 'init --dev --agent kilo --project', plugin: 'on'}
+          - {case: v2-user, init: 'init --dev --v2 --agent kilo', plugin: 'on'}
+          - {case: v1-user-uninstalled, init: 'init --dev --agent kilo', plugin: 'off'}
+          - {case: v2-user-uninstalled, init: 'init --dev --v2 --agent kilo', plugin: 'off'}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
