@@ -1,0 +1,122 @@
+name: qwen-windows-verify
+# Fork-only verification for Tracekit #406. Never part of the PR.
+on:
+  push:
+    branches: ['verify/406-*']
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the release tags from upstream (the fork has none)
+        run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q -e ".[dev]"
+      - name: Lint
+        run: python -m pyflakes tracekit tracekit_sdk.py tests eval examples
+      - name: Full suite (Linux, the merge gate)
+        if: runner.os == 'Linux'
+        run: python -m pytest -q -o faulthandler_timeout=240
+      - name: Hook tests (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest -q -o faulthandler_timeout=240 tests/test_agent_hooks.py tests/test_harness_hooks_v2.py
+      - name: The new tests fail without the change
+        shell: bash
+        run: |
+          base=ca2126e18f4e1d16320a438060f5c8400c510fa0   # the PR branch's base on upstream main
+          git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git $base
+          git checkout $base -- tracekit/agent_hooks.py
+          git diff --cached --stat
+          set +e
+          python -m pytest -q -k "qwen_runs_its_hook_under_powershell or under_powershell_the_installed_hook_blocks" \
+            tests/test_agent_hooks.py tests/test_harness_hooks_v2.py
+          code=$?
+          echo "pytest exit without the change: $code"
+          test $code -eq 1
+
+  qwen:
+    strategy:
+      fail-fast: false
+      matrix:
+        start: [cmd, gitbash]
+        form: [init, no-exit-tail]
+        qwen: ['0.26.5']
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SPACED: 'C:\Program Files\Tk Python'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Versions and shell environment
+        run: |
+          (Get-CimInstance Win32_OperatingSystem).Caption
+          [System.Environment]::OSVersion.VersionString
+          "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion"
+          "ComSpec=$env:ComSpec MSYSTEM=$env:MSYSTEM TERM=$env:TERM"
+          powershell -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          node --version
+      - name: Put a real Python in a path with a space
+        run: |
+          $src = Split-Path (Get-Command python).Source
+          Copy-Item -Recurse $src $env:SPACED
+          & "$env:SPACED\python.exe" -c "import sys; print(sys.executable, sys.version)"
+      - name: Install Tracekit into it
+        run: |
+          & "$env:SPACED\python.exe" -m pip install -q .
+          & "$env:SPACED\Scripts\tracekit.exe" --version
+      - name: Install real Qwen Code from npm
+        run: |
+          npm install -g "@qwen-code/qwen-code@${{ matrix.qwen }}"
+          qwen --version
+      - name: tracekit init
+        run: |
+          & "$env:SPACED\Scripts\tracekit.exe" init --dev --v2 --agent qwen
+          $s = "$HOME\.qwen\settings.json"
+          if ('${{ matrix.form }}' -eq 'no-exit-tail') {
+            # control: the same hook without the exit tail, to show what PowerShell does to exit 2
+            (Get-Content -Raw $s).Replace('; exit $LASTEXITCODE', '') | Set-Content -NoNewline -Encoding utf8 $s
+          }
+          Get-Content $s
+      - name: Real Qwen Code session against a local stub model
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          $log = "$env:RUNNER_TEMP\model.log"
+          Start-Process -NoNewWindow python -ArgumentList @('.github\verify406\stub_model.py', $log)
+          New-Item -ItemType Directory "$env:RUNNER_TEMP\proj" | Out-Null
+          Set-Location "$env:RUNNER_TEMP\proj"
+          $env:OPENAI_API_KEY = 'stub'; $env:OPENAI_BASE_URL = 'http://127.0.0.1:8765/v1'; $env:OPENAI_MODEL = 'stub-model'
+          if ('${{ matrix.start }}' -eq 'gitbash') { $env:MSYSTEM = 'MINGW64' }
+          qwen -p "run the checks" --auth-type openai --approval-mode yolo -m stub-model --debug
+          "qwen exit: $LASTEXITCODE"
+      - name: Results
+        if: always()
+        run: |
+          $p = "$env:RUNNER_TEMP\proj"
+          "start=${{ matrix.start }} form=${{ matrix.form }} qwen=${{ matrix.qwen }}"
+          "denied marker exists (the denied call ran): $(Test-Path "$p\denied-marker.txt")"
+          "allowed marker exists: $(Test-Path "$p\allowed-marker.txt")"
+          "--- what Qwen Code sent the model"
+          Get-Content "$env:RUNNER_TEMP\model.log" -ErrorAction SilentlyContinue
+          "--- tracekit last"
+          Set-Location $p
+          & "$env:SPACED\Scripts\tracekit.exe" last
+          "tracekit last exit: $LASTEXITCODE"
