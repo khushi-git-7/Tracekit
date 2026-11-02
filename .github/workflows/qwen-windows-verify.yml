@@ -1,0 +1,79 @@
+name: qwen-windows-verify
+on:
+  push:
+    branches: ['verify/406-*']
+permissions:
+  contents: read
+jobs:
+  qwen:
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [installed, editable, gitbash]
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SPACED: 'C:\Program Files\Tk Python'
+      QWEN_VERSION: '0.26.5'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Versions and shell environment
+        run: |
+          [System.Environment]::OSVersion.VersionString
+          (Get-CimInstance Win32_OperatingSystem).Caption
+          "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion"
+          "ComSpec=$env:ComSpec MSYSTEM=$env:MSYSTEM TERM=$env:TERM"
+          node --version
+      - name: Put a real Python in a path with a space
+        run: |
+          $src = Split-Path (Get-Command python).Source
+          Copy-Item -Recurse $src $env:SPACED
+          & "$env:SPACED\python.exe" -c "import sys; print(sys.executable, sys.version)"
+      - name: Install Tracekit into it
+        run: |
+          if ('${{ matrix.mode }}' -eq 'editable') { & "$env:SPACED\python.exe" -m pip install -q -e . }
+          else { & "$env:SPACED\python.exe" -m pip install -q . }
+          & "$env:SPACED\Scripts\tracekit.exe" --version
+      - name: Install real Qwen Code from npm
+        run: |
+          npm install -g "@qwen-code/qwen-code@$env:QWEN_VERSION"
+          qwen --version
+      - name: Probe command forms the way Qwen Code spawns them
+        run: node .github/verify406/probe.js "$env:SPACED\python.exe"
+      - name: tracekit init
+        run: |
+          & "$env:SPACED\Scripts\tracekit.exe" init --dev --v2 --agent qwen
+          Get-Content "$HOME\.qwen\settings.json"
+      - name: Real Qwen Code session against a stub model
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          $log = "$env:RUNNER_TEMP\model.log"
+          Start-Process -NoNewWindow python -ArgumentList @('.github\verify406\stub_model.py', $log)
+          New-Item -ItemType Directory "$env:RUNNER_TEMP\proj" | Out-Null
+          Set-Location "$env:RUNNER_TEMP\proj"
+          $env:OPENAI_API_KEY = 'stub'; $env:OPENAI_BASE_URL = 'http://127.0.0.1:8765/v1'; $env:OPENAI_MODEL = 'stub-model'
+          if ('${{ matrix.mode }}' -eq 'gitbash') { $env:MSYSTEM = 'MINGW64' }
+          qwen -p "run the checks" --auth-type openai --approval-mode yolo -m stub-model --debug
+          "qwen exit: $LASTEXITCODE"
+      - name: Results
+        if: always()
+        run: |
+          $p = "$env:RUNNER_TEMP\proj"
+          "denied marker exists: $(Test-Path "$p\denied-marker.txt")"
+          "allowed marker exists: $(Test-Path "$p\allowed-marker.txt")"
+          "--- what Qwen Code sent the model"
+          Get-Content "$env:RUNNER_TEMP\model.log" -ErrorAction SilentlyContinue
+          "--- tracekit last"
+          Set-Location $p
+          & "$env:SPACED\Scripts\tracekit.exe" last
+          "tracekit last exit: $LASTEXITCODE"
