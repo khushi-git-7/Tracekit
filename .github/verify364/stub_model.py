@@ -4,6 +4,7 @@ Kilo's own background_process tool with a denied command, then it stops. Every r
 what Kilo sent back after each call."""
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
@@ -19,6 +20,8 @@ def turn(body):
     if not body.get("tools"):
         return None, "ok"
     done = sum(1 for m in body.get("messages", []) if m.get("role") == "tool")
+    if done == len(CALLS):
+        time.sleep(5)   # a background process the control run let start has time to write its marker
     return (CALLS[done], None) if done < len(CALLS) else (None, "finished")
 
 

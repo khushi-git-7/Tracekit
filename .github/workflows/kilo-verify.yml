@@ -117,6 +117,7 @@ jobs:
       - name: Results
         if: always()
         run: |
+          set +e
           cd "$PROJ"
           echo "case=${{ matrix.case }} plugin=${{ matrix.plugin }} kilo=$(kilo --version)"
           echo "denied bash call ran (marker exists): $(test -f denied-marker.txt && echo yes || echo no)"
@@ -130,6 +131,21 @@ jobs:
           grep -i -E "plugin|tracekit|tool.execute|blocked" "$RUNNER_TEMP/kilo.err" | cut -c1-400 | head -60 || true
           echo "--- tracekit last --open"
           tracekit last --open -o "$RUNNER_TEMP/last.tkb"; echo "exit: $?"
+          echo "--- v2: the calls and decisions in that bundle"
+          python - "$RUNNER_TEMP/last.tkb" <<'EOF'
+          import json, sys, zipfile
+          try:
+              z = zipfile.ZipFile(sys.argv[1])
+          except (OSError, zipfile.BadZipFile) as e:
+              sys.exit(f"no v2 bundle: {e}")
+          for n in z.namelist():
+              if n.startswith("runs/"):
+                  for line in z.read(n).decode().splitlines():
+                      r = json.loads(line)
+                      e = r.get("event", r)
+                      d = e.get("data") or e.get("payload") or {}
+                      print(" ", e.get("type") or e.get("kind"), json.dumps(d)[:300])
+          EOF
           echo "--- tracekit last"
           tracekit last -o "$RUNNER_TEMP/last-closed.tkb"; echo "exit: $?"
           echo "--- v1 ledger: this run's tool calls and decisions"
