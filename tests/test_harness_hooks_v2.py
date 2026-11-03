@@ -417,6 +417,19 @@ class OnTheDevPolicy(HarnessCase):
         self.assertEqual((code, json.loads(out)["hookSpecificOutput"]["permissionDecision"]), (CODEX_DENY, "deny"))
         self.assertIn("TK-D001", err)
 
+    def test_qwen_under_cmd_exe_an_event_argument_with_the_tail_leaves_the_payloads_event(self):
+        # #406: Qwen Code before 0.15.0 runs the Windows command under cmd.exe, which hands `PreToolUse;` to Python; it
+        # replaced the payload's event, so the call wasn't decided and ran
+        base = {"session_id": "qw-cmd", "hook_event_name": "PreToolUse", "tool_name": "run_shell_command"}
+        for tid, command, expected in (("q1", "ls -la", 0), ("q2", "sudo -i", 2)):
+            payload = json.dumps({**base, "tool_use_id": tid, "tool_input": {"command": command}})
+            err = io.StringIO()
+            with mock.patch.object(sys, "stdin", io.StringIO(payload)), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(err):
+                self.assertEqual(harness_hooks.entry("qwen", "PreToolUse;"), expected, err.getvalue())
+            if expected:
+                self.assertIn("TK-D001", err.getvalue())
+
     def test_droid_patch_decides_every_file_including_a_move_destination(self):
         patch = ("*** Begin Patch\n*** Add File: notes.txt\n+hi\n*** Update File: src/a.py\n"
                  "*** Move to: {}\n@@\n-x\n+y\n*** End Patch")
@@ -596,6 +609,7 @@ class Installer(unittest.TestCase):
                         blob = json.load(f)
                     key = {"antigravity": agent_hooks.AGY_HOOK}.get(harness, "hooks")   # agy: Tracekit's named hook
                     hooks = [h for hs in (blob if harness == "droid" else blob[key]).values() for h in hs]
+                    self.assertLessEqual(set(blob if harness == "droid" else blob[key]), agent_hooks.EVENTS)   # entry
                     # Cursor's and Crush's configs are flat {command, ...} entries; the others nest them under `hooks`
                     cmds = [h["command"] if "command" in h else h["hooks"][0]["command"] for h in hooks]
                     self.assertEqual({agent_hooks._version(c) for c in cmds}, {"v2"})
