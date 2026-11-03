@@ -417,6 +417,19 @@ class OnTheDevPolicy(HarnessCase):
         self.assertEqual((code, json.loads(out)["hookSpecificOutput"]["permissionDecision"]), (CODEX_DENY, "deny"))
         self.assertIn("TK-D001", err)
 
+    def test_qwen_under_cmd_exe_an_event_argument_with_the_tail_leaves_the_payloads_event(self):
+        # #406: Qwen Code before 0.15.0 runs the Windows command under cmd.exe, which hands `PreToolUse;` to Python; it
+        # replaced the payload's event, so the call wasn't decided and ran
+        base = {"session_id": "qw-cmd", "hook_event_name": "PreToolUse", "tool_name": "run_shell_command"}
+        for tid, command, expected in (("q1", "ls -la", 0), ("q2", "sudo -i", 2)):
+            payload = json.dumps({**base, "tool_use_id": tid, "tool_input": {"command": command}})
+            err = io.StringIO()
+            with mock.patch.object(sys, "stdin", io.StringIO(payload)), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(err):
+                self.assertEqual(harness_hooks.entry("qwen", "PreToolUse;"), expected, err.getvalue())
+            if expected:
+                self.assertIn("TK-D001", err.getvalue())
+
     def test_droid_patch_decides_every_file_including_a_move_destination(self):
         patch = ("*** Begin Patch\n*** Add File: notes.txt\n+hi\n*** Update File: src/a.py\n"
                  "*** Move to: {}\n@@\n-x\n+y\n*** End Patch")
@@ -596,6 +609,7 @@ class Installer(unittest.TestCase):
                         blob = json.load(f)
                     key = {"antigravity": agent_hooks.AGY_HOOK}.get(harness, "hooks")   # agy: Tracekit's named hook
                     hooks = [h for hs in (blob if harness == "droid" else blob[key]).values() for h in hs]
+                    self.assertLessEqual(set(blob if harness == "droid" else blob[key]), agent_hooks.EVENTS)   # entry
                     # Cursor's and Crush's configs are flat {command, ...} entries; the others nest them under `hooks`
                     cmds = [h["command"] if "command" in h else h["hooks"][0]["command"] for h in hooks]
                     self.assertEqual({agent_hooks._version(c) for c in cmds}, {"v2"})
@@ -1501,6 +1515,27 @@ class VersionNotice(HarnessCase):
             self.assertIsNone(claude_code.VERSION.fullmatch(theirs), theirs)
         for theirs in ("1.5.2", "1.5.2rc1", "1.5.2+deb1", "1!1.5.2.post1-x_y"):
             self.assertTrue(claude_code.VERSION.fullmatch(theirs), theirs)
+
+    def test_a_session_with_no_state_gets_no_lock_file(self):
+        """1.5.3 review: _skew opened the session's lock file, which makes it, before it found the session had no
+        state: every SessionEnd under a version skew left one behind, kept until a later SessionStart pruned it."""
+        lock = claude_code._state("cc-gone")[:-len(".json")] + ".lock"
+        self.assertIsNone(claude_code._skew(mock.Mock(hello={"version": "1.4.0"}, signer=None), "cc-gone"))
+        self.assertFalse(os.path.exists(lock))
+
+    def test_a_reworded_retry_runs_under_no_approval_while_a_held_wording_cant_be_read(self):
+        """Review of #536: an approval_get that failed (a timeout, a signer restarting) on what may be the rejected
+        wording let a reworded retry run under the approved one."""
+        args = {"command": "make deploy", "description": "Deploy again"}
+        held = [{"rest": claude_code._rest(args), "digest": f"sha256:{n}", "approval_id": f"apr-{n}"} for n in "12"]
+        with open(claude_code._state("cc-u"), "w") as f:
+            json.dump({"run_id": "r", "held": held}, f)
+
+        def get(req):
+            if req["approval_id"] == "apr-2":   # the newest, read first
+                raise RPCError("forbidden", "not yours to read")
+            return {"run_id": "r", "tool": "Bash", "state": "approved", "args": dict(args, description="Deploy")}
+        self.assertEqual(claude_code._reworded(mock.Mock(approval_get=get), "cc-u", args, lambda: None), (None, None))
 
     def test_once_said_no_event_takes_the_session_lock_for_it(self):
         """Review of #512: while the versions differed, every event took the session lock to find it said already."""

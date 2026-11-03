@@ -260,7 +260,7 @@ def entry(harness=None, event=None):
         print(f"usage: python -m tracekit.integrations.harness_hooks {{{'|'.join(agent_hooks.HARNESSES)}}} [EVENT]; "
               "blocking", file=sys.stderr)
         return 2
-    return run(harness, agent_hooks.stdin_text(), event=event)
+    return run(harness, agent_hooks.stdin_text(), event=event if event in agent_hooks.EVENTS else None)
 
 
 if __name__ == "__main__":

@@ -436,6 +436,12 @@ class Tee(io.StringIO):
 
 
 PRE = ("PreToolUse", "preToolUse", "BeforeTool", "tool.execute.before")
+# the events Tracekit's hooks are installed for. Qwen Code before 0.15.0 runs a Windows hook under cmd.exe, which hands
+# the command's `; exit $LASTEXITCODE` (_command) to Python as arguments: an event argument that isn't one of these
+# leaves the payload's own hook_event_name (#406)
+EVENTS = frozenset((*PRE, "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "SessionStart", "SessionEnd",
+                    "postToolUse", "postToolUseFailure", "beforeSubmitPrompt", "sessionStart", "sessionEnd", *CURSOR_SAID,
+                    "AfterTool", "BeforeAgent", "tool.execute.after"))
 PAIRED = ("gemini", "droid", "antigravity")   # the harnesses whose call ids _paired_ids makes
 
 
@@ -1149,7 +1155,9 @@ def stdin_text():
 
 def entry(harness=None, event=None):
     """event: the hook event the command names (OpenCode's plugin does), or None."""
-    harness = harness or (sys.argv[1] if len(sys.argv) > 1 else "")
+    # under cmd.exe, the v1 Qwen Code command's last argument comes as `qwen;` (EVENTS)
+    harness = (harness or (sys.argv[1] if len(sys.argv) > 1 else "")).removesuffix(";")
+    event = event if event in EVENTS else None
     if harness not in HARNESSES:
         closed = H.fail_closed()
         print(f"usage: python -m tracekit.agent_hooks {{{'|'.join(HARNESSES)}}} [EVENT]; "
