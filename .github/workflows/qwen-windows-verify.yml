@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the PR's earlier commit, for the step that runs the new tests on it
       - name: Fetch the release tags from upstream (the fork has none)
         run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git "+refs/tags/v*:refs/tags/v*"
       - uses: actions/setup-python@v5
@@ -32,13 +34,11 @@ jobs:
       - name: The new tests fail without the change
         shell: bash
         run: |
-          base=ca2126e18f4e1d16320a438060f5c8400c510fa0   # the PR branch's base on upstream main
-          git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git $base
-          git checkout $base -- tracekit/agent_hooks.py
+          # round 2: the PR's code before the event fallback (fa2e446, the head the review read)
+          git checkout fa2e446 -- tracekit/agent_hooks.py tracekit/integrations/harness_hooks.py
           git diff --cached --stat
           set +e
-          python -m pytest -q -k "qwen_runs_its_hook_under_powershell or under_powershell_the_installed_hook_blocks" \
-            tests/test_agent_hooks.py tests/test_harness_hooks_v2.py
+          python -m pytest -q -k "qwen_under_cmd_exe" tests/test_agent_hooks.py tests/test_harness_hooks_v2.py
           code=$?
           echo "pytest exit without the change: $code"
           test $code -eq 1
@@ -53,15 +53,25 @@ jobs:
         include:   # the last Qwen Code before a hook's "shell" was read (0.14.5), and the first after (0.15.0)
           - {start: cmd, form: init, qwen: '0.14.5'}
           - {start: cmd, form: init, qwen: '0.15.0'}
+          # round 2: 0.14.5 under cmd.exe with a Python path that needs no quotes, on the PR's earlier code and now;
+          # and 0.14.5 under Git Bash with the spaced path
+          - {start: cmd, form: init, qwen: '0.14.5', py: 'C:\TkPython', code: before}
+          - {start: cmd, form: init, qwen: '0.14.5', py: 'C:\TkPython', code: now}
+          - {start: gitbash, form: init, qwen: '0.14.5'}
     runs-on: windows-latest
     timeout-minutes: 25
     defaults:
       run:
         shell: pwsh
     env:
-      SPACED: 'C:\Program Files\Tk Python'
+      PYDIR: ${{ matrix.py || 'C:\Program Files\Tk Python' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The PR's code before the event fallback
+        if: matrix.code == 'before'
+        run: git checkout fa2e446 -- tracekit/agent_hooks.py tracekit/integrations/harness_hooks.py
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -76,22 +86,22 @@ jobs:
           "ComSpec=$env:ComSpec MSYSTEM=$env:MSYSTEM TERM=$env:TERM"
           powershell -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
           node --version
-      - name: Put a real Python in a path with a space
+      - name: Put a real Python in its own folder
         run: |
           $src = Split-Path (Get-Command python).Source
-          Copy-Item -Recurse $src $env:SPACED
-          & "$env:SPACED\python.exe" -c "import sys; print(sys.executable, sys.version)"
+          Copy-Item -Recurse $src $env:PYDIR
+          & "$env:PYDIR\python.exe" -c "import sys; print(sys.executable, sys.version)"
       - name: Install Tracekit into it
         run: |
-          & "$env:SPACED\python.exe" -m pip install -q .
-          & "$env:SPACED\Scripts\tracekit.exe" --version
+          & "$env:PYDIR\python.exe" -m pip install -q .
+          & "$env:PYDIR\Scripts\tracekit.exe" --version
       - name: Install real Qwen Code from npm
         run: |
           npm install -g "@qwen-code/qwen-code@${{ matrix.qwen }}"
           qwen --version
       - name: tracekit init
         run: |
-          & "$env:SPACED\Scripts\tracekit.exe" init --dev --v2 --agent qwen
+          & "$env:PYDIR\Scripts\tracekit.exe" init --dev --v2 --agent qwen
           $s = "$HOME\.qwen\settings.json"
           if ('${{ matrix.form }}' -eq 'no-exit-tail') {
             # control: the same hook without the exit tail, to show what PowerShell does to exit 2
@@ -114,12 +124,14 @@ jobs:
         if: always()
         run: |
           $p = "$env:RUNNER_TEMP\proj"
-          "start=${{ matrix.start }} form=${{ matrix.form }} qwen=${{ matrix.qwen }}"
+          "start=${{ matrix.start }} form=${{ matrix.form }} qwen=${{ matrix.qwen }} python=$env:PYDIR code=${{ matrix.code || 'now' }}"
+          "--- the PreToolUse hook init wrote"
+          (Get-Content -Raw "$HOME\.qwen\settings.json" | ConvertFrom-Json).hooks.PreToolUse[0].hooks[0] | Format-List
           "denied marker exists (the denied call ran): $(Test-Path "$p\denied-marker.txt")"
           "allowed marker exists: $(Test-Path "$p\allowed-marker.txt")"
           "--- what Qwen Code sent the model"
           Get-Content "$env:RUNNER_TEMP\model.log" -ErrorAction SilentlyContinue
           "--- tracekit last"
           Set-Location $p
-          & "$env:SPACED\Scripts\tracekit.exe" last --open
+          & "$env:PYDIR\Scripts\tracekit.exe" last --open
           "tracekit last --open exit: $LASTEXITCODE"
