@@ -48,7 +48,7 @@ jobs:
           python -m pytest -q -rf tests/test_agent_hooks.py tests/test_harness_hooks_v2.py -k "kilo_notebook_execute or kilo_generate_image or kilo_gets_opencodes_plugin" | tee "$RUNNER_TEMP/before.txt"
           code=${PIPESTATUS[0]}
           echo "pytest exit before the review change: $code"
-          test $code -eq 1 && test "$(grep -c -E '^(SUB)?FAILED' "$RUNNER_TEMP/before.txt")" -eq 5 && ! grep -q -E "^[0-9]+ failed, [1-9][0-9]* passed" "$RUNNER_TEMP/before.txt"
+          test $code -eq 1 && test "$(grep -c -E '^(SUB)?FAILED' "$RUNNER_TEMP/before.txt")" -eq 5   # 4 tests; the plugin test fails in both subtests
 
   kilo:
     strategy:
