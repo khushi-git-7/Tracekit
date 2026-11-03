@@ -1,0 +1,141 @@
+name: qwen-windows-verify
+# Fork-only verification for Tracekit #406. Never part of the PR.
+on:
+  push:
+    branches: ['verify/406-*']
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the maintainer's head, for the step that runs the new test on it
+      - name: Fetch the release tags from upstream (the fork has none)
+        run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q -e ".[dev]"
+      - name: Lint
+        run: python -m pyflakes tracekit tracekit_sdk.py tests eval examples
+      - name: Full suite (Linux, the merge gate)
+        if: runner.os == 'Linux'
+        run: python -m pytest -q -o faulthandler_timeout=240
+      - name: Hook tests (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest -q -o faulthandler_timeout=240 tests/test_agent_hooks.py tests/test_harness_hooks_v2.py
+      - name: The new test fails without the change
+        shell: bash
+        run: |
+          # round 3: the maintainer's head (4c889e1), before the v1 fix
+          git checkout 4c889e1 -- tracekit/agent_hooks.py
+          git diff --cached --stat
+          set +e
+          python -m pytest -q -k "qwen_under_cmd_exe_a_denied_call" tests/test_agent_hooks.py
+          code=$?
+          echo "pytest exit without the change: $code"
+          test $code -eq 1
+
+  qwen:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the v1 hook, 0.14.5 under cmd.exe, a Python path that needs no quotes: on 4c889e1 and with the fix
+          - {start: cmd, qwen: '0.14.5', py: 'C:\TkPython', hooks: v1, code: before}
+          - {start: cmd, qwen: '0.14.5', py: 'C:\TkPython', hooks: v1, code: now}
+          # the v2 hook: 0.14.5 under Git Bash with a path that needs no quotes; 0.26.5 from either shell, spaced path
+          - {start: gitbash, qwen: '0.14.5', py: 'C:\TkPython', hooks: v2, code: now}
+          - {start: cmd, qwen: '0.26.5', py: 'C:\Program Files\Tk Python', hooks: v2, code: now}
+          - {start: gitbash, qwen: '0.26.5', py: 'C:\Program Files\Tk Python', hooks: v2, code: now}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYDIR: ${{ matrix.py }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The maintainer's head, before the v1 fix
+        if: matrix.code == 'before'
+        run: git checkout 4c889e1 -- tracekit/agent_hooks.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Versions and shell environment
+        run: |
+          (Get-CimInstance Win32_OperatingSystem).Caption
+          [System.Environment]::OSVersion.VersionString
+          "ComSpec=$env:ComSpec MSYSTEM=$env:MSYSTEM"
+          powershell -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          node --version
+      - name: Put a real Python in its own folder
+        run: |
+          $src = Split-Path (Get-Command python).Source
+          Copy-Item -Recurse $src $env:PYDIR
+          & "$env:PYDIR\python.exe" -c "import sys; print(sys.executable, sys.version)"
+      - name: Install Tracekit into it
+        run: |
+          & "$env:PYDIR\python.exe" -m pip install -q .
+          & "$env:PYDIR\Scripts\tracekit.exe" --version
+      - name: Install real Qwen Code from npm
+        run: |
+          npm install -g "@qwen-code/qwen-code@${{ matrix.qwen }}"
+          qwen --version
+      - name: tracekit init
+        run: |
+          if ('${{ matrix.hooks }}' -eq 'v2') {
+            & "$env:PYDIR\Scripts\tracekit.exe" init --dev --v2 --agent qwen
+          } else {
+            & "$env:PYDIR\Scripts\tracekit.exe" init --dev --agent qwen
+          }
+          Get-Content "$HOME\.qwen\settings.json"
+      - name: Real Qwen Code session against a local stub model
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          $log = "$env:RUNNER_TEMP\model.log"
+          Start-Process -NoNewWindow python -ArgumentList @('.github\verify406\stub_model.py', $log)
+          New-Item -ItemType Directory "$env:RUNNER_TEMP\proj" | Out-Null
+          Set-Location "$env:RUNNER_TEMP\proj"
+          $env:OPENAI_API_KEY = 'stub'; $env:OPENAI_BASE_URL = 'http://127.0.0.1:8765/v1'; $env:OPENAI_MODEL = 'stub-model'
+          if ('${{ matrix.start }}' -eq 'gitbash') { $env:MSYSTEM = 'MINGW64' }
+          qwen -p "run the checks" --auth-type openai --approval-mode yolo -m stub-model --debug
+          "qwen exit: $LASTEXITCODE"
+      - name: Results
+        if: always()
+        continue-on-error: true
+        run: |
+          $p = "$env:RUNNER_TEMP\proj"
+          "start=${{ matrix.start }} qwen=${{ matrix.qwen }} python=$env:PYDIR hooks=${{ matrix.hooks }} code=${{ matrix.code }}"
+          "--- the PreToolUse hook init wrote"
+          (Get-Content -Raw "$HOME\.qwen\settings.json" | ConvertFrom-Json).hooks.PreToolUse[0].hooks[0] | Format-List
+          "denied marker exists (the denied call ran): $(Test-Path "$p\denied-marker.txt")"
+          "allowed marker exists: $(Test-Path "$p\allowed-marker.txt")"
+          "--- what Qwen Code sent the model"
+          Get-Content "$env:RUNNER_TEMP\model.log" -ErrorAction SilentlyContinue
+          "--- what Tracekit recorded"
+          Set-Location $p
+          if ('${{ matrix.hooks }}' -eq 'v2') {
+            & "$env:PYDIR\Scripts\tracekit.exe" last --open
+            "tracekit last exit: $LASTEXITCODE"
+          } else {
+            & "$env:PYDIR\Scripts\tracekit.exe" status
+            "--- v1 ledger: policy decisions"
+            Get-ChildItem -Recurse -File -Filter *.jsonl -ErrorAction SilentlyContinue $HOME, $env:LOCALAPPDATA, $env:APPDATA |
+              ForEach-Object { $f = $_.FullName; Select-String -Path $f -Pattern '"decision":\s*"(\w+)"' -AllMatches |
+                ForEach-Object { "$f : $($_.Matches.Groups[1].Value)" } }
+          }
