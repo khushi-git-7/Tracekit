@@ -41,6 +41,7 @@ jobs:
         if: always()
         run: |
           git checkout HEAD -- tracekit/
+          git fetch --no-tags --depth=1 origin aeada375e29b64d76824431819d34de31de079cb
           git checkout aeada375e29b64d76824431819d34de31de079cb -- tracekit/   # the PR before the review commit
           git diff --cached --stat
           set +e
