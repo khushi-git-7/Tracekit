@@ -28,15 +28,26 @@ jobs:
         run: make build PY=python
       - name: The new tests fail without the change
         run: |
-          base=ca2126e18f4e1d16320a438060f5c8400c510fa0   # the PR branch's base on upstream main
+          base=63af2b0c63eb45afa9cfba0fa3d5592e376f9fb0   # upstream main, merged into the PR branch
           git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git $base
           git checkout $base -- tracekit/
           git diff --cached --stat
           set +e
-          python -m pytest -q -k kilo tests/test_agent_hooks.py tests/test_system_install.py
+          python -m pytest -q -k kilo tests/test_agent_hooks.py tests/test_harness_hooks_v2.py tests/test_system_install.py
           code=$?
           echo "pytest exit without the change: $code"
           test $code -eq 1
+      - name: The review's new tests fail on the PR before the review change
+        if: always()
+        run: |
+          git checkout HEAD -- tracekit/
+          git checkout aeada375e29b64d76824431819d34de31de079cb -- tracekit/   # the PR before the review commit
+          git diff --cached --stat
+          set +e
+          python -m pytest -q -rf tests/test_agent_hooks.py tests/test_harness_hooks_v2.py -k "kilo_notebook_execute or kilo_generate_image or kilo_gets_opencodes_plugin" | tee "$RUNNER_TEMP/before.txt"
+          code=${PIPESTATUS[0]}
+          echo "pytest exit before the review change: $code"
+          test $code -eq 1 && grep -q "4 failed" "$RUNNER_TEMP/before.txt"
 
   kilo:
     strategy:
