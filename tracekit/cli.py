@@ -358,6 +358,13 @@ def _parser():
                                                              "init --dev --v2 --public-witness turns it back on)")
     p.add_argument("--json", action="store_true", help="wait, then print its hello as JSON")
     p.add_argument("--replace", action="store_true", help="stop the running dev signer first, even an incompatible one")
+    p.add_argument("--isolated", action="store_true", help="(experimental) run the agent in a container, its signer "
+                   f"outside it: `tracekit up --isolated [-- COMMAND ...]` ({wiki_url('docs/design/isolated-up.md')})")
+    p.add_argument("--image", help="with --isolated: the agent's image (default: tracekit-box:dev, built from "
+                   "deploy/box/Dockerfile)")
+    p.add_argument("--project", default=".", help="with --isolated: the project dir the box gets at /work")
+    p.add_argument("command", nargs=argparse.REMAINDER, help="with --isolated: what the box runs (default: the "
+                   "image's command)")
     sub.add_parser("down", help="stop the local signer (dev mode)")
     p = sub.add_parser("doctor", help=f"check this setup (v1/v2 system mode, the dev signer); {wiki_url('docs/doctor.md')}")
     p.add_argument("--json", action="store_true", help="print [{id, status, detail, fix}]")
@@ -877,6 +884,20 @@ def _run(a):
         print(*_status_lines(st, v2, install.plugin_enabled(), chosen), *([install.DEV_MODE_LINE] if dev else []),
               "(tracekit status --json prints all of it)", sep="\n")
         return 0
+    if a.cmd == "up" and (a.isolated or a.command or a.image or a.project != "."):
+        from . import box
+        from .sdk.client import SignerUnavailable
+        if not a.isolated:
+            print("tracekit up: --image, --project and a command go with --isolated", file=sys.stderr)
+            return 2
+        if not _signer_extra():
+            return 2
+        experimental("tracekit up --isolated")
+        try:
+            return box.up(a.project, a.image or box.IMAGE, a.command[1:] if a.command[:1] == ["--"] else a.command)
+        except (box.BoxError, OSError, ValueError, SignerUnavailable) as e:
+            print(f"tracekit up --isolated: {e}", file=sys.stderr)
+            return 1
     if a.cmd == "up":
         from . import install
         from .sdk import autospawn
