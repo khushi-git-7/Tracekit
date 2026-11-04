@@ -265,8 +265,9 @@ export const MEANING: Record<string, Partial<Record<Check["status"], string>>> =
       + "like every other.",
   },
   "boxed agent": {
-    pass: "Runs of a Tracekit Box box and of its agent: proof against the agent in that box only, whose box never held "
-      + "the signing key. The records are the agent's own account; the box's doors are what held it.",
+    pass: "Runs of a Tracekit Box box and of its agent, or of a tracekit up --isolated container box: proof against "
+      + "the agent in that box only, whose box never held the signing key. The records are the agent's own account; the "
+      + "box's doors are what held it. A container box's token is no proof against a process of the signer's own user.",
     warn: "A record carries a box label where or how the signer never writes one: nothing is claimed about the key. "
       + "The record verified like every other.",
   },

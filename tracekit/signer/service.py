@@ -2281,6 +2281,10 @@ class SignerService:
     def _isolation(identity):
         if identity.scheme == "uid" and hasattr(os, "getuid"):
             return "same-user" if identity.subject == str(os.getuid()) else "separate-user"
+        if identity.scheme == "token" and identity.claims.get("box"):
+            # a box's token (tracekit up --isolated): any process of this signer's user can hold it too, so no
+            # isolation from the agent is measured; run.registered's ext.box says the key was outside that box
+            return "unknown"
         # k8s_sa, mtls and tokens other than the dev transport's authenticate over the HTTP transport only
         if identity.scheme in ("k8s_sa", "mtls", "oidc", "token") and subject(identity) != "token:dev":
             return "remote"
@@ -2744,8 +2748,11 @@ class SignerService:
                 tx.set(run, "principal", principal)
             # a box channel's run records the identity its transport established, the daemon's (a closed format field),
             # and its box in ext.box; its isolation is unknown, whatever this signer's own: no general claim covers it
+            # a `tracekit up --isolated` box's token: any process of this signer's user can hold it too, so its isolation
+            # is unknown as well (_isolation), and its run.registered names the token in ext.box
+            token_box = identity.scheme == "token" and bool(identity.claims.get("box"))
             data = {"agent": req["agent"], "fail_modes": self.fail_modes,
-                    "signer_isolation": "unknown" if boxed else self.isolation or self._isolation(identity),
+                    "signer_isolation": "unknown" if boxed or token_box else self.isolation or self._isolation(identity),
                     "identity": _recorded(identity.claims["daemon"] if boxed else identity)}
             data.update({k: req[k] for k in ("analyzes", "replay_of", "investigation") if k in req})
             if up:
@@ -2761,6 +2768,9 @@ class SignerService:
             if label:
                 tx.set(run, "box", label)
                 top["ext"] = {"box": label}
+            elif token_box:   # non-critical (format-v2.md §9): a verifier that doesn't read it sees `unknown`, claims
+                # nothing; not run["box"], which marks a Tracekit Box run (_channel_open)
+                top["ext"] = {"box": {"token": identity.subject}}
             tx.emit(run, "run.registered", data, request_id=req["request_id"], **top)
             # evasion: a new run of a held owner and principal, or of a held parent run, starts held
             now = _iso(time.time())

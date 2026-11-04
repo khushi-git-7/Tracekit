@@ -112,8 +112,8 @@ verifier checks when it interprets them (EXT_CHECKS, each on lines of its own) a
 interpreted` warning each (MAX_UNREAD of them; one more counts the rest); the records are signed, chained and included like any other, and the bundle stays VERIFIED.
 This one interprets `amended` (the fields an LLM gateway changed in a request to show reasoning: `gateway amendments`),
 `openshell.policy` (OpenShell's sandbox policy changes, from the OpenShell middleware's OCSF import: `openshell
-policy`) and `box` (the label of a Tracekit Box box's run and of its agent channel's runs: `boxed agent`, which says
-what they prove instead of the general claim).
+policy`) and `box` (the label of a Tracekit Box box's run and of its agent channel's runs, or of a run a `tracekit up
+--isolated` box's token registered: `boxed agent`, which says what they prove instead of the general claim).
 
 Run-set (a bundle with registry/run-set.json): the tenant's registry notes, signed by the pinned log key under the
 origin `<origin>/registry/<id of the bundle's tenant salt>`, cosigned by the required number of pinned witnesses (their
@@ -275,6 +275,16 @@ def _box_label(e):
         and v.get("channel", "agent") == "agent"
 
 
+def _token_label(e):
+    """Whether `e` carries ext.box as the signer writes it for a `tracekit up --isolated` box: {token}, on the
+    run.registered of a run that box's token registered, its isolation `unknown` (any process of the signer's own user
+    on the host can hold that token too)."""
+    v, d = e["ext"].get("box") if isinstance(e.get("ext"), dict) else None, e.get("data")
+    i = d.get("identity") if isinstance(d, dict) else None
+    return e.get("type") == "run.registered" and isinstance(v, dict) and set(v) == {"token"} and isinstance(i, dict) \
+        and i.get("scheme") == "token" and i.get("subject") == v["token"] and d.get("signer_isolation") == "unknown"
+
+
 def _box(rep, events):
     """ext.box: the label of a Tracekit Box box's run (its daemon's account of the box, with the engine from the
     signer's own config) and of each run its agent channel registered (a copy, with parent_run). The signing key was
@@ -282,10 +292,11 @@ def _box(rep, events):
     account, the box's doors held it, and anything running as the daemon's or the signer's user on the host is outside
     the claim. Anywhere else, or in another shape, a warning and no claim. Only the bundle's own runs are claimed for
     (rep.firsts: the seqs of their first records): a run-set's records of other runs (`pointed`) carry their labels
-    too. rep.boxed: the runs claimed for and the lines tracekit.verify.summary prints for them in place of the general
+    too. A `tracekit up --isolated` box's run (_token_label) is proof against the agent in its container, and not
+    against a process of the signer's own user, which could hold the box's token. rep.boxed: the runs claimed for and the lines tracekit.verify.summary prints for them in place of the general
     claim (with a label the signer never writes: every run, and none is claimed for)."""
     firsts = getattr(rep, "firsts", None)
-    bad = [e for e in events if not _box_label(e)]
+    bad = [e for e in events if not (_box_label(e) or _token_label(e))]
     if bad:
         rep.boxed = (len(events) if firsts is None else len(firsts), [
             "NOT SHOWN: a record carries a box label the signer never writes, so nothing is claimed about who could "
@@ -298,12 +309,19 @@ def _box(rep, events):
     if not good:   # labels of runs this bundle doesn't hold
         return
     one, agent = len(good) == 1, any("parent_run" in e["data"] for e in good)
-    lines = [f"{BOXED} ({', '.join(sorted({ENGINES[e['ext']['box']['engine']] for e in good}))}): the signing key was "
+    tokens = sum("token" in e["ext"]["box"] for e in good)
+    kinds = {"container" if "token" in e["ext"]["box"] else ENGINES[e["ext"]["box"]["engine"]] for e in good}
+    lines = [f"{BOXED} ({', '.join(sorted(kinds))}): the signing key was "
              f"outside its box for {'this run' if one else f'these {len(good)} runs'}.",
+             ("This run's records are the agent's own account of its calls." if one else "These runs' records are the "
+              "agents' own account of their calls.") if tokens == len(good) else
              f"This run's records are the agent's own account of its calls; {DOORS} are the record of what it could do."
              if one and agent else f"This run's records are {DOORS}, as the Box daemon recorded them." if one else
              f"In these runs, the agent's records are its own account of its calls; {DOORS} are the record of what it "
              "could do.",
+             *([f"{'It' if one else f'{tokens} of them'} ran in a container box (tracekit up --isolated): no proof "
+                "against a process of the signer's own user on the host, which could hold the box's token."]
+               if tokens else []),
              "Before you run anything the box wrote, review it: code you run on this machine can reach the key.",
              *(f"anchored by {a}" for a in getattr(rep, "anchored", ()))]
     rep.boxed = (len(good), lines)

@@ -748,15 +748,30 @@ function boxLabel(e: J): boolean {
 }
 
 /**
+ * Whether `e` carries ext.box as the signer writes it for a `tracekit up --isolated` box: {token}, on the
+ * run.registered of a run that box's token registered, its isolation `unknown` (any process of the signer's own user
+ * on the host can hold that token too).
+ */
+function tokenLabel(e: J): boolean {
+  const v = isObj(get(e, "ext")) ? get(e.ext, "box") : null, d = get(e, "data");
+  const i = isObj(d) ? get(d, "identity") : null;
+  return get(e, "type") === "run.registered" && isObj(v) && Object.keys(v).length === 1
+    && Object.hasOwn(v, "token") && isObj(i) && get(i, "scheme") === "token" && get(i, "subject") === v.token
+    && get(d, "signer_isolation") === "unknown";
+}
+
+/**
  * ext.box: the label of a Tracekit Box box's run (its daemon's account of the box, with the engine from the signer's
  * own config) and of each run its agent channel registered (a copy, with parent_run). The signing key was outside that
  * box, so the runs are proof against the agent in it, and no more: an agent run's records are its own account, the
  * box's doors held it, and anything running as the daemon's or the signer's user on the host is outside the claim.
  * Anywhere else, or in another shape, a warning and no claim. Only the bundle's own runs are claimed for
- * (rep.firsts): a run-set's records of other runs carry their labels too.
+ * (rep.firsts): a run-set's records of other runs carry their labels too. A `tracekit up --isolated` box's run
+ * (tokenLabel) is proof against the agent in its container, and not against a process of the signer's own user,
+ * which could hold the box's token.
  */
 function checkBox(rep: Report, events: J[]) {
-  const bad = events.filter((e) => !boxLabel(e));
+  const bad = events.filter((e) => !(boxLabel(e) || tokenLabel(e)));
   if (bad.length) {
     rep.check("boxed agent", false, `${bad.length} record(s) carry ext.box where or how the signer never writes it: `
       + "no proof against a boxed agent", bad.map((e) => `seq ${str(get(e, "seq"))}: ext.box is not a box's label on `
@@ -766,13 +781,20 @@ function checkBox(rep: Report, events: J[]) {
   const good = events.filter((e) => rep.firsts.has(get(e, "seq")));
   if (!good.length) return;   // labels of runs this bundle doesn't hold
   const one = good.length === 1, agent = good.some((e) => Object.hasOwn(e.data, "parent_run"));
-  const kinds = [...new Set(good.map((e) => ENGINES[e.ext.box.engine]))].sort(byCodePoint).join(", ");
+  const tokens = good.filter((e) => Object.hasOwn(e.ext.box, "token")).length;
+  const kinds = [...new Set(good.map((e) => Object.hasOwn(e.ext.box, "token") ? "container" : ENGINES[e.ext.box.engine]))]
+    .sort(byCodePoint).join(", ");
   rep.check("boxed agent", true, `${BOXED} (${kinds}): the signing key was outside its box for `
-    + `${one ? "this run" : `these ${good.length} runs`}.`, [one && agent
+    + `${one ? "this run" : `these ${good.length} runs`}.`, [tokens === good.length
+    ? one ? "This run's records are the agent's own account of its calls."
+      : "These runs' records are the agents' own account of their calls."
+    : one && agent
     ? `This run's records are the agent's own account of its calls; ${DOORS} are the record of what it could do.`
     : one ? `This run's records are ${DOORS}, as the Box daemon recorded them.`
       : `In these runs, the agent's records are its own account of its calls; ${DOORS} are the record of what it `
         + "could do.",
+  ...(tokens ? [`${one ? "It" : `${tokens} of them`} ran in a container box (tracekit up --isolated): no proof against a `
+    + "process of the signer's own user on the host, which could hold the box's token."] : []),
   "Before you run anything the box wrote, review it: code you run on this machine can reach the key.",
   ...rep.anchored.map((a) => `anchored by ${a}`)]);
 }
