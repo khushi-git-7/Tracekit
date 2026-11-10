@@ -1,4 +1,4 @@
-name: capture-cline (fork only)
+name: capture-cline
 on:
   push:
     branches: [verify/695-capture]
