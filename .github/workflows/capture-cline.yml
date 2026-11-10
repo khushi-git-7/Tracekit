@@ -1,5 +1,6 @@
 name: capture-cline
 on:
+  pull_request:
   push:
     branches: [verify/695-capture]
   workflow_dispatch:
