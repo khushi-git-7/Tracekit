@@ -1,0 +1,67 @@
+name: capture-cline (fork only)
+on:
+  push:
+    branches: [verify/695-capture]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CAPTURE_DIR: /tmp/capture
+      CAPTURE_WORK: /tmp/clinework
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g cline@3.0.74
+      - name: CLI help
+        run: |
+          cline --version || true
+          cline --help || true
+          cline auth --help || true
+      - name: A recording hook for every event, in every directory Cline might read
+        run: |
+          mkdir -p "$CAPTURE_DIR" "$CAPTURE_WORK/.clinerules/hooks" "$CAPTURE_WORK/.cline/hooks" ~/.cline/hooks ~/Documents/Cline/Hooks
+          echo "some notes" > "$CAPTURE_WORK/notes.txt"
+          for d in ~/.cline/hooks ~/Documents/Cline/Hooks "$CAPTURE_WORK/.clinerules/hooks" "$CAPTURE_WORK/.cline/hooks"; do
+            for e in PreToolUse PostToolUse TaskStart TaskComplete TaskCancel UserPromptSubmit; do
+              cp capture/record_hook.sh "$d/$e"
+              chmod +x "$d/$e"
+            done
+          done
+          cd "$CAPTURE_WORK" && git init -q
+      - name: Scripted model
+        run: |
+          nohup python3 capture/fake_model.py 8765 > "$CAPTURE_DIR/model.log" 2>&1 &
+          sleep 1
+          curl -s http://127.0.0.1:8765/v1/models
+      - name: Point the CLI at the scripted model
+        run: |
+          cline auth --provider openai --apikey test --modelid scripted --baseurl http://127.0.0.1:8765/v1 \
+            || cline auth --provider openai-compatible --apikey test --modelid scripted --baseurl http://127.0.0.1:8765/v1 \
+            || cline auth --provider openai-native --apikey test --modelid scripted --baseurl http://127.0.0.1:8765/v1
+      - name: One headless task
+        working-directory: /tmp/clinework
+        run: |
+          timeout 300 cline --yolo --json "Run the command, read notes.txt, then create created.txt" \
+            > "$CAPTURE_DIR/cline.ndjson" 2> "$CAPTURE_DIR/cline.err" || echo "exit $?"
+      - name: What was captured
+        if: always()
+        run: |
+          cat "$CAPTURE_DIR/hooks.tsv" || echo "no hook ran"
+          for f in "$CAPTURE_DIR"/hook-*.json; do echo "== $f"; cat "$f"; echo; done
+          echo "== stderr"; tail -c 4000 "$CAPTURE_DIR/cline.err" || true
+          echo "== ndjson"; tail -c 6000 "$CAPTURE_DIR/cline.ndjson" || true
+          echo "== requests"; cut -c1-400 "$CAPTURE_DIR/requests.jsonl" || true
+          ls -la /tmp/clinework
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cline-capture
+          path: /tmp/capture
