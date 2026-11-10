@@ -16,6 +16,7 @@ STEPS = [
     ("run_commands", {"commands": ["echo captured-by-tracekit"]}),
     ("read_files", {"files": [{"path": os.path.join(WORK, "notes.txt")}]}),
     ("editor", {"command": "create", "path": os.path.join(WORK, "created.txt"), "file_text": "hello\n"}),
+    ("submit_and_exit", {"summary": "done"}),
 ]
 
 
