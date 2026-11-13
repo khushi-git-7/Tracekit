@@ -1,0 +1,42 @@
+name: verify-722b
+on:
+  push:
+    branches: [verify/722-fsync]
+permissions:
+  contents: read
+jobs:
+  space:
+    name: state space ${{ matrix.os }} ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.13"}
+          - {os: windows-latest, python: "3.13"}
+          - {os: macos-latest, python: "3.13"}
+          - {os: ubuntu-22.04, python: "3.9"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]" pyflakes
+      - name: pyflakes
+        run: python -m pyflakes tests/test_bounded.py
+      - name: ApprovalStateSpace with the change
+        run: python -m pytest -q --durations=0 -p no:cacheprovider tests/test_bounded.py::ApprovalStateSpace
+      - name: "Mutation: every sync counted as made outside the signer, so the new assertion must fail"
+        if: always()
+        shell: bash
+        env:
+          TRACEKIT_BOUND_APPROVALS: "3"
+        run: |
+          sed -i.bak 's/not in SIGNER_SYNCS:/not in ("nowhere",):/' tests/test_bounded.py
+          grep -c '"nowhere"' tests/test_bounded.py
+          if python -m pytest -q -p no:cacheprovider tests/test_bounded.py::ApprovalStateSpace > out.txt 2>&1; then
+            echo "UNEXPECTED: passed"; tail -5 out.txt; exit 1
+          fi
+          grep -E "^E +(AssertionError|assert)|^E .* != 0|failed" out.txt | head -6
