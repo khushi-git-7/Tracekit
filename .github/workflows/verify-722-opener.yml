@@ -1,0 +1,36 @@
+name: verify-722-opener
+on:
+  push:
+    branches: [verify/722-opener]
+permissions:
+  contents: read
+jobs:
+  t:
+    name: opener ${{ matrix.os }} ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.13"}
+          - {os: windows-latest, python: "3.13"}
+          - {os: ubuntu-22.04, python: "3.9"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]" pyflakes
+      - name: pyflakes
+        run: python -m pyflakes tracekit/client.py tests/test_ingest.py
+      - name: test_ingest, and the files whose senders use the opener
+        run: python -m pytest -q -p no:cacheprovider tests/test_ingest.py tests/test_witness_server.py tests/test_review_model.py --durations=3
+      - name: The new tests against main's client.py (expected to fail on 3.12 on)
+        if: always()
+        shell: bash
+        run: |
+          git fetch -q --depth=1 https://github.com/Cygnux-Labs/Tracekit main
+          git checkout FETCH_HEAD -- tracekit/client.py
+          python -m pytest -q -p no:cacheprovider tests/test_ingest.py -k "share_one_opener or redirect_is_not_followed" 2>&1 | grep -E "^E +|passed|failed|Error" | head -8 || true
