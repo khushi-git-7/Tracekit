@@ -87,9 +87,11 @@ ORPHAN_S = 60   # a box token this old with no box running is revoked: younger, 
 GRANTS = ("register_run", "decide", "approval_consume", "complete", "close_run", "model_event", "approval_request",
           "approval_wait", "state_write", "status", "observe", "constraint_add", "approval_get")
 # project paths the host runs on its own, beside every coding agent's project config (host_run): git's hooks and
-# config, Claude Code's settings, the hook frameworks' configs (husky, pre-commit, lefthook), MCP servers, editor tasks
+# config, Claude Code's settings, the hook frameworks' configs (husky, pre-commit, lefthook), MCP servers, editor tasks,
+# and gptme's project config (its hooks are the user's own, ~/.config/gptme, but a project's gptme.toml loads plugins)
 HOST_RUN = (".git", ".claude", ".husky", ".pre-commit-config.yaml", "lefthook.yml", "lefthook.yaml", ".lefthook.yml",
-            ".lefthook.yaml", "lefthook-local.yml", ".mcp.json", ".vscode", ".idea", ".kilocode")
+            ".lefthook.yaml", "lefthook-local.yml", ".mcp.json", ".vscode", ".idea", ".kilocode", "gptme.toml",
+            "gptme.local.toml")
 PLACEHOLDER = (".git", ".claude")   # mounted read-only even when missing, so the box can't create one
 # files the host may run without being asked to (a build, a test run, a shell entering the dir): listed when changed
 RUNS = {"Makefile", "makefile", "GNUmakefile", "package.json", "setup.py", "setup.cfg", "pyproject.toml", "conftest.py",
@@ -338,10 +340,10 @@ def start(path, cfg):
 
 def host_run(project):
     """The paths under `project` the host runs on its own: HOST_RUN and each coding agent's project config
-    (agent_hooks.config_path, the one list of them)."""
+    (agent_hooks.config_path, the one list of them; a harness whose hooks are only the user's has none here)."""
     from tracekit import agent_hooks
-    return sorted(set(HOST_RUN) | {os.path.relpath(agent_hooks.config_path(a, project), project).split(os.sep)[0]
-                                   for a in agent_hooks.HARNESSES})
+    rel = (os.path.relpath(agent_hooks.config_path(a, project), project).split(os.sep)[0] for a in agent_hooks.HARNESSES)
+    return sorted(set(HOST_RUN) | {n for n in rel if n != os.pardir})
 
 
 def _under(path, d):

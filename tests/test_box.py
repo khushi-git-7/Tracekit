@@ -90,7 +90,11 @@ class Argv(unittest.TestCase):
             self.assertIn(f"/work/{n}", ro)
         self.assertNotIn("/h/empty:/work/.git:ro", mounts(self.argv()))   # there now: no placeholder
         self.assertLessEqual({".codex", ".cursor", ".gemini", ".qwen", ".factory", ".agents", ".opencode", ".kilo",
-                              ".devin", "crush.json"}, set(box.host_run(self.project)))   # agent_hooks' harness list
+                              ".devin", "crush.json", ".openhands", ".github", ".codebuddy", "gptme.toml"},
+                            set(box.host_run(self.project)))   # agent_hooks' harness list
+        # gptme's hooks are the user's own (~/.config/gptme): nothing outside the project is mounted, which Docker
+        # refuses anyway (`/work/..` is `/`)
+        self.assertNotIn(os.pardir, box.host_run(self.project))
 
 
 @unittest.skipUnless(hasattr(os, "getuid"), "the box runs as your uid: macOS and Linux")
@@ -119,6 +123,7 @@ class Project(unittest.TestCase):
             os.remove(os.path.join(p, name))
 
 
+@unittest.skipUnless(hasattr(os, "getuid"), "the box runs as your uid: macOS and Linux")
 class Problems(unittest.TestCase):
     H = "/h/box"
 
