@@ -1,0 +1,42 @@
+name: verify-722e
+on:
+  push:
+    branches: [verify/722-e20]
+permissions:
+  contents: read
+jobs:
+  e20:
+    name: e20 probe ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      - name: ModelArm as on main
+        run: python -m pytest -q --durations=3 -p no:cacheprovider tests/test_review_model.py::ModelArm
+      - name: ModelArm with fsync stubbed everywhere (experiment)
+        shell: bash
+        run: |
+          python -c "
+          import os, sys, pytest
+          import tracekit.storage.file as f
+          os.fsync = lambda fd: None
+          if hasattr(os, 'fdatasync'): os.fdatasync = lambda fd: None
+          f._sync = lambda fd, full: None
+          sys.exit(pytest.main(['-q', '--durations=3', '-p', 'no:cacheprovider', 'tests/test_review_model.py::ModelArm']))"
+      - name: ModelArm under cProfile (top 30 by own time)
+        shell: bash
+        run: |
+          python -c "
+          import cProfile, pstats, sys, pytest
+          pr = cProfile.Profile(); pr.enable()
+          pytest.main(['-q', '-p', 'no:cacheprovider', 'tests/test_review_model.py::ModelArm'])
+          pr.disable(); pstats.Stats(pr).sort_stats('tottime').print_stats(30)" 2>&1 | tail -45
