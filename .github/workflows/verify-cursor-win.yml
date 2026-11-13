@@ -38,3 +38,13 @@ jobs:
         run: |
           python -m pytest -q -p no:cacheprovider tests/test_agent_hooks.py -k "cursor or windows or Windows" 2>&1 | tail -15
           python -m pytest -q -p no:cacheprovider tests/test_agent_hooks.py::Harnesses::test_cursor_edit_tools_are_decided_as_edits
+      - name: the regression test, and the whole v1 policy file it is in
+        shell: bash
+        run: python -m pytest -q -p no:cacheprovider tests/test_hardening.py 2>&1 | tail -5
+      - name: the regression test against main's policy.py (expected to fail)
+        shell: bash
+        run: |
+          git fetch -q --depth=1 https://github.com/Cygnux-Labs/Tracekit main
+          git show FETCH_HEAD:tracekit/policy.py > tracekit/policy.py
+          python -m pytest -q -p no:cacheprovider tests/test_hardening.py -k windows_path 2>&1 | tail -8 || true
+          git checkout -- tracekit/policy.py
