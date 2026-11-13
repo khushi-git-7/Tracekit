@@ -111,6 +111,8 @@ def offered(body):
                 out[t["name"] + "__" + sub["name"]] = (("namespace", t["name"], sub["name"]), sub.get("parameters"))
         elif t.get("type") == "custom":
             out[t["name"]] = ("custom", None)
+        elif "input_schema" in t:   # Anthropic Messages
+            out[t["name"]] = ("function", t["input_schema"])
         elif "name" in t:
             out[t["name"]] = (t.get("type"), None)
     return out
@@ -127,8 +129,10 @@ def plan(tools):
 
 
 def done_count(body):
-    if "messages" in body:
-        return sum(1 for m in body["messages"] if m.get("role") == "tool")
+    if "messages" in body:   # Chat's tool messages, or Messages' tool_result blocks
+        return sum(1 for m in body["messages"] if m.get("role") == "tool") + sum(
+            1 for m in body["messages"] if isinstance(m.get("content"), list)
+            for c in m["content"] if isinstance(c, dict) and c.get("type") == "tool_result")
     return sum(1 for i in body.get("input") or [] if isinstance(i, dict) and
                i.get("type") in ("function_call_output", "custom_tool_call_output"))
 
@@ -176,6 +180,29 @@ class H(BaseHTTPRequestHandler):
             f.write(json.dumps({"t": time.time(), "path": self.path, "body": body,
                                 "answer": call and {"name": call[0], "kind": call[1], "args": call[2]}}) + "\n")
         cid = f"call_{int(time.time() * 1000) % 10**9}"
+        if self.path.endswith("/messages"):   # Anthropic Messages, streamed
+            msg = {"id": "msg_" + cid, "type": "message", "role": "assistant", "model": body.get("model", "mock"),
+                   "content": [], "stop_reason": None, "stop_sequence": None,
+                   "usage": {"input_tokens": 10, "output_tokens": 1}}
+            evs = [("message_start", {"type": "message_start", "message": msg})]
+            if call:
+                name, kind, args, n = call
+                evs += [("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {
+                            "type": "tool_use", "id": "toolu_" + cid, "name": name, "input": {}}}),
+                        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {
+                            "type": "input_json_delta", "partial_json": json.dumps(args)}})]
+                stop = "tool_use"
+            else:
+                evs += [("content_block_start", {"type": "content_block_start", "index": 0,
+                                                 "content_block": {"type": "text", "text": ""}}),
+                        ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                                 "delta": {"type": "text_delta", "text": "done"}})]
+                stop = "end_turn"
+            evs += [("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                    ("message_delta", {"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None},
+                                       "usage": {"output_tokens": 5}}),
+                    ("message_stop", {"type": "message_stop"})]
+            return self.sse(evs)
         if self.path.endswith("/responses"):
             evs = [("response.created", {"type": "response.created", "response": {"id": "resp_" + cid}})]
             if call:

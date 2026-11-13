@@ -42,8 +42,7 @@ jobs:
           .github/rec698/run.sh code-mode 8707 responses none gpt-5.6-sol bypass
           .github/rec698/run.sh native-responses 8701 responses none gpt-5.1-codex bypass
           .github/rec698/run.sh native-chat 8702 chat none gpt-5.1-codex bypass
-          .github/rec698/run.sh claude-code-responses 8703 responses claude-code gpt-5.6-sol bypass
-          .github/rec698/run.sh claude-code-chat 8706 chat claude-code gpt-5.6-sol bypass --chat-completions
+          .github/rec698/run.sh claude-code 8703 messages claude-code claude-sonnet-4-5 bypass
           .github/rec698/run.sh untrusted 8704 responses none gpt-5.1-codex none
           .github/rec698/run.sh trusted-by-tracekit 8705 responses none gpt-5.1-codex tracekit
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
