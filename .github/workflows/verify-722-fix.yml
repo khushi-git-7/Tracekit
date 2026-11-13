@@ -1,0 +1,43 @@
+name: verify-722-fix
+on:
+  push:
+    branches: [verify/722-fix]
+permissions:
+  contents: read
+jobs:
+  timings:
+    name: py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pyflakes tracekit tests
+      - name: After (this branch)
+        run: python -m pytest -q --durations=6 -p no:cacheprovider tests/test_why_langgraph.py
+      - name: The guard test alone, after
+        if: always()
+        run: python -m pytest -q -p no:cacheprovider "tests/test_why_langgraph.py::Branches::test_a_branch_collection_scans_only_what_the_trials_allocate" "tests/test_why_langgraph.py::Branches::test_a_host_s_own_freeze_is_kept"
+      - name: The new tests against main's langgraph.py (expected to fail on 3.12)
+        if: always()
+        shell: bash
+        run: |
+          git show b1ca3da:tracekit/why/langgraph.py > tracekit/why/langgraph.py
+          echo "_FROZEN_AT_IMPORT = gc.get_freeze_count()   # the name only: the tests read it; main's behaviour is unchanged" >> tracekit/why/langgraph.py
+          python -m pytest -q -p no:cacheprovider "tests/test_why_langgraph.py::Branches::test_a_branch_collection_scans_only_what_the_trials_allocate" "tests/test_why_langgraph.py::Branches::test_a_host_s_own_freeze_is_kept" 2>&1 | tail -25 || true
+      - name: Before (main)
+        if: always()
+        shell: bash
+        run: |
+          git checkout b1ca3da -- tracekit tests
+          python -m pytest -q --durations=6 -p no:cacheprovider tests/test_why_langgraph.py
