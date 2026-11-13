@@ -1,0 +1,40 @@
+name: verify-cursor-win
+on:
+  push:
+    branches: [verify/cursor-win-env, verify/cursor-win-fix]
+permissions:
+  contents: read
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]" pyflakes
+      - name: the v1 default policy on Windows-style and POSIX-style paths
+        shell: bash
+        run: |
+          python - <<'EOF'
+          from tracekit import policy
+          pol = policy.load(policy.DEFAULT_POLICY)[0]
+          for tool, path in (("Edit", r"C:\w\.env"), ("Edit", "C:/w/.env"), ("Write", r"C:\Users\u\.ssh\authorized_keys"),
+                             ("Write", r"C:\Users\u\.ssh\id_rsa"), ("Write", r"C:\w\.aws\credentials"), ("Edit", "/w/.env"),
+                             ("Edit", r"C:\w\app.py"), ("Edit", r"C:\w\.env.example")):
+              d = policy.evaluate(pol, tool, {"file_path": path}, None)
+              print(f"{tool:6} {path:40} {d['decision']:6} {d['rule_ids']}")
+          EOF
+      - name: pyflakes
+        run: python -m pyflakes tracekit tests
+      - name: the Cursor test, and the v1 policy tests touched
+        shell: bash
+        run: |
+          python -m pytest -q -p no:cacheprovider tests/test_agent_hooks.py -k "cursor or windows or Windows" 2>&1 | tail -15
+          python -m pytest -q -p no:cacheprovider tests/test_agent_hooks.py::Harnesses::test_cursor_edit_tools_are_decided_as_edits
