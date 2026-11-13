@@ -20,11 +20,14 @@ jobs:
       - name: install Open Interpreter ${{ env.OI_TAG }} (release binary)
         run: |
           mkdir -p "$RUNNER_TEMP/bin"
-          curl -fsSL -o oi.tar.gz "https://github.com/openinterpreter/openinterpreter/releases/download/$OI_TAG/codex-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o oi.tar.gz "https://github.com/openinterpreter/openinterpreter/releases/download/$OI_TAG/open-interpreter-package-x86_64-unknown-linux-musl.tar.gz"
           sha256sum oi.tar.gz
-          tar -xzf oi.tar.gz -C "$RUNNER_TEMP/bin"
-          mv "$RUNNER_TEMP/bin"/codex-x86_64-unknown-linux-musl "$RUNNER_TEMP/bin/interpreter"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          tar -tzvf oi.tar.gz | head -40
+          mkdir -p "$RUNNER_TEMP/oi-pkg" && tar -xzf oi.tar.gz -C "$RUNNER_TEMP/oi-pkg"
+          BIN=$(dirname "$(find "$RUNNER_TEMP/oi-pkg" -type f \( -name interpreter -o -name codex \) | head -1)")
+          echo "binary dir: $BIN"; ls -la "$BIN"
+          [ -e "$BIN/interpreter" ] || ln -s "$BIN/codex" "$BIN/interpreter"
+          echo "$BIN" >> "$GITHUB_PATH"
       - name: versions and help
         run: |
           interpreter --version
@@ -36,12 +39,13 @@ jobs:
         run: |
           chmod +x .github/rec698/run.sh
           interpreter features list || true
-          .github/rec698/run.sh native-responses 8701 responses none gpt-5.6-sol bypass
-          .github/rec698/run.sh native-chat 8702 chat none gpt-5.6-sol bypass
+          .github/rec698/run.sh code-mode 8707 responses none gpt-5.6-sol bypass
+          .github/rec698/run.sh native-responses 8701 responses none gpt-5.1-codex bypass
+          .github/rec698/run.sh native-chat 8702 chat none gpt-5.1-codex bypass
           .github/rec698/run.sh claude-code-responses 8703 responses claude-code gpt-5.6-sol bypass
           .github/rec698/run.sh claude-code-chat 8706 chat claude-code gpt-5.6-sol bypass --chat-completions
-          .github/rec698/run.sh untrusted 8704 responses none gpt-5.6-sol none
-          .github/rec698/run.sh trusted-by-tracekit 8705 responses none gpt-5.6-sol tracekit
+          .github/rec698/run.sh untrusted 8704 responses none gpt-5.1-codex none
+          .github/rec698/run.sh trusted-by-tracekit 8705 responses none gpt-5.1-codex tracekit
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

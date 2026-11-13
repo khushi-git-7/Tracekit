@@ -81,9 +81,26 @@ def args_for(intent, value, name, schema):
     return {}
 
 
+# Code Mode: the model gets one `exec` tool (JavaScript) whose code calls the real tools; one step per exec call
+CODE_MODE = [
+    'await tools.exec_command({cmd: "echo rec698"});',
+    r'await tools.apply_patch("*** Begin Patch\n*** Add File: notes.txt\n+one\n*** End Patch\n");',
+    'await tools.exec_command({cmd: "echo deny-me"});',
+    'await tools.mcp__rec_server__echo_text({text: "hello-mcp"});',
+    'await tools.get_goal({});',
+]
+
+
 def offered(body):
-    """{name: (kind, schema)} of the tools in a Responses or Chat request."""
+    """{name: (kind, schema)} of the tools in a Responses or Chat request (Responses' additional_tools input items
+    too, where Code Mode puts its namespaced tools)."""
     out = {}
+    extra = [t for i in body.get("input") or [] if isinstance(i, dict) and i.get("type") == "additional_tools"
+             for t in i.get("tools") or []]
+    for t in extra:
+        for sub in t.get("tools") or []:
+            out[t["name"] + "__" + sub["name"]] = (("namespace-" + sub.get("type", ""), t["name"], sub["name"]),
+                                                   sub.get("parameters"))
     for t in body.get("tools") or []:
         if t.get("type") == "function" and "function" in t:   # chat
             out[t["function"]["name"]] = ("function", t["function"].get("parameters"))
@@ -120,6 +137,9 @@ def next_call(body):
     tools = offered(body)
     if not tools:
         return None
+    if "functions__exec" in tools:
+        n = done_count(body)
+        return None if n >= len(CODE_MODE) else ("exec", tools["functions__exec"][0], {"input": CODE_MODE[n]}, n)
     steps = plan(tools)
     n = done_count(body)
     if n >= len(steps):
@@ -160,7 +180,10 @@ class H(BaseHTTPRequestHandler):
             evs = [("response.created", {"type": "response.created", "response": {"id": "resp_" + cid}})]
             if call:
                 name, kind, args, n = call
-                item = ({"type": "custom_tool_call", "id": "ctc_" + cid, "call_id": cid, "name": name,
+                item = ({"type": "custom_tool_call", "id": "ctc_" + cid, "call_id": cid, "name": kind[2],
+                         "namespace": kind[1], "input": args["input"], "status": "completed"}
+                        if isinstance(kind, tuple) and kind[0] == "namespace-custom" else
+                        {"type": "custom_tool_call", "id": "ctc_" + cid, "call_id": cid, "name": name,
                          "input": args["input"], "status": "completed"} if kind == "custom" else
                         {"type": "function_call", "id": "fc_" + cid, "call_id": cid, "name": kind[2],
                          "namespace": kind[1], "arguments": json.dumps(args), "status": "completed"}
