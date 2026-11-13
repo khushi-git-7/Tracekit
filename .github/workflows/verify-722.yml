@@ -1,0 +1,23 @@
+name: verify-722
+on:
+  push:
+    branches: [verify/722-durations]
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: bounded probe ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      - run: python capture/bounded_probe.py
