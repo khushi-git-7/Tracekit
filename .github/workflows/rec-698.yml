@@ -1,0 +1,47 @@
+name: rec-698
+on:
+  push:
+    branches: [verify/698-record]
+permissions:
+  contents: read
+jobs:
+  record:
+    name: record Open Interpreter hook payloads
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OI_TAG: rust-v0.0.61
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: install Open Interpreter ${{ env.OI_TAG }} (release binary)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o oi.tar.gz "https://github.com/openinterpreter/openinterpreter/releases/download/$OI_TAG/codex-x86_64-unknown-linux-musl.tar.gz"
+          sha256sum oi.tar.gz
+          tar -xzf oi.tar.gz -C "$RUNNER_TEMP/bin"
+          mv "$RUNNER_TEMP/bin"/codex-x86_64-unknown-linux-musl "$RUNNER_TEMP/bin/interpreter"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: versions and help
+        run: |
+          interpreter --version
+          interpreter --help | head -60
+          interpreter exec --help | head -80
+      - name: record
+        env:
+          OUT: ${{ runner.temp }}/rec698
+        run: |
+          chmod +x .github/rec698/run.sh
+          .github/rec698/run.sh native-responses 8701 responses none gpt-5.1-codex bypass
+          .github/rec698/run.sh native-chat 8702 chat none gpt-5.1-codex bypass
+          .github/rec698/run.sh claude-code 8703 chat claude-code claude-sonnet-4-5 bypass
+          .github/rec698/run.sh untrusted 8704 responses none gpt-5.1-codex none
+          .github/rec698/run.sh trusted-by-tracekit 8705 responses none gpt-5.1-codex tracekit
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rec698
+          path: ${{ runner.temp }}/rec698
