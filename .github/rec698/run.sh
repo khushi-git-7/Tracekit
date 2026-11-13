@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# One recording scenario: run.sh LABEL PORT WIRE_API HARNESS MODEL TRUST(bypass|none|tracekit)
+# One recording scenario: run.sh LABEL PORT WIRE_API HARNESS MODEL TRUST(bypass|none|tracekit) [EXEC FLAG...]
 set -u
 LABEL=$1 PORT=$2 WIRE=$3 HARNESS=$4 MODEL=$5 TRUST=$6
+shift 6
 KIT=$(cd "$(dirname "$0")" && pwd)
 export REC_DIR=$OUT/$LABEL INTERPRETER_HOME=$RUNNER_TEMP/oi-$LABEL MOCK_API_KEY=mock
 WORK=$RUNNER_TEMP/work-$LABEL
@@ -51,6 +52,7 @@ MOCK=$!
 sleep 1
 FLAGS=(exec --json --skip-git-repo-check -C "$WORK")
 [ "$TRUST" = bypass ] && FLAGS+=(--dangerously-bypass-hook-trust)
+FLAGS+=("$@")
 timeout 300 interpreter "${FLAGS[@]}" "Run the recording plan." > "$REC_DIR/exec.jsonl" 2> "$REC_DIR/exec.stderr"
 echo "exit $?" > "$REC_DIR/exit"
 kill $MOCK 2>/dev/null

@@ -18,7 +18,7 @@ PLAN = [
     ("shell", "echo fail-me"),      # the hook exits 1: runs?
     ("shell", "echo slow-me"),      # the hook outlives its timeout: runs?
     ("shell", "echo json-deny"),    # the hook answers permissionDecision deny on stdout, exit 0
-    ("mcp", None), ("fetch", None), ("delete", None),
+    ("mcp", None), ("fetch", None), ("other", None), ("delete", None),
 ]
 CANDIDATES = {
     "shell": ["Bash", "exec_command", "shell_command", "shell", "local_shell", "Shell"],
@@ -30,6 +30,7 @@ CANDIDATES = {
     "grep": ["Grep", "grep_files"],
     "mcp": [],   # any tool whose name ends with echo_text
     "fetch": ["WebFetch", "web_fetch", "FetchUrl"],
+    "other": ["get_goal", "TodoWrite"],   # a tool that is neither shell, file nor MCP: does PreToolUse fire?
     "delete": ["apply_patch"],
 }
 
@@ -70,6 +71,8 @@ def args_for(intent, value, name, schema):
         return {"pattern": "uno", "path": WORK}
     if intent == "mcp":
         return {"text": "hello-mcp"}
+    if intent == "other":
+        return {"todos": [{"content": "record", "status": "pending", "activeForm": "Recording"}]}             if name == "TodoWrite" else {}
     if intent == "fetch":
         out = {"url": "https://example.com"}
         if "prompt" in props:
@@ -86,6 +89,9 @@ def offered(body):
             out[t["function"]["name"]] = ("function", t["function"].get("parameters"))
         elif t.get("type") == "function":
             out[t["name"]] = ("function", t.get("parameters"))
+        elif t.get("type") == "namespace":   # Responses: an MCP server's tools, called by name and namespace
+            for sub in t.get("tools") or []:
+                out[t["name"] + "__" + sub["name"]] = (("namespace", t["name"], sub["name"]), sub.get("parameters"))
         elif t.get("type") == "custom":
             out[t["name"]] = ("custom", None)
         elif "name" in t:
@@ -156,6 +162,9 @@ class H(BaseHTTPRequestHandler):
                 name, kind, args, n = call
                 item = ({"type": "custom_tool_call", "id": "ctc_" + cid, "call_id": cid, "name": name,
                          "input": args["input"], "status": "completed"} if kind == "custom" else
+                        {"type": "function_call", "id": "fc_" + cid, "call_id": cid, "name": kind[2],
+                         "namespace": kind[1], "arguments": json.dumps(args), "status": "completed"}
+                        if isinstance(kind, tuple) else
                         {"type": "function_call", "id": "fc_" + cid, "call_id": cid, "name": name,
                          "arguments": json.dumps(args), "status": "completed"})
             else:
