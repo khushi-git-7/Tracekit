@@ -379,6 +379,10 @@ class ApprovalStateSpace(unittest.TestCase):
     def part(actions, prefix, start):
         """(in a worker process) Sequences start.. of the space, RUNS_PER_SIGNER of them, on a signer of their own:
         (what was wrong, the outcomes reached)."""
+        if os.environ.get("TK_EXPERIMENT_NO_FSYNC"):   # EXPERIMENT (#722, fork only): no fsync in this worker
+            import tracekit.storage.file as _sf
+            _sf._sync = lambda fd, full: None
+            os.fsync = lambda fd: None
         d, expect, wrong, reached = tempfile.mkdtemp(), {}, [], set()   # lean: left behind when a part raises
         s = svc.SignerService(d, policy=ts.PAY_ASKS, limits=LIMITS)
         sequences = itertools.islice(itertools.product(actions, repeat=APPROVALS_DEPTH), start, start + RUNS_PER_SIGNER)

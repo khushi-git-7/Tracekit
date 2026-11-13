@@ -20,4 +20,11 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install -e ".[dev]"
-      - run: python capture/bounded_probe.py
+      - name: ApprovalStateSpace as on main
+        run: python -m pytest -q --durations=0 -p no:cacheprovider tests/test_bounded.py::ApprovalStateSpace
+      - name: ApprovalStateSpace with fsync stubbed in the workers (experiment)
+        env:
+          TK_EXPERIMENT_NO_FSYNC: "1"
+        run: python -m pytest -q --durations=0 -p no:cacheprovider tests/test_bounded.py::ApprovalStateSpace
+      - name: Pool start-up alone (spawn 4 workers, import test_bounded, no work)
+        run: python -c "import sys,time;sys.path.insert(0,'tests');from factories import process_pool;t=time.perf_counter();p=process_pool();list(p.map(__import__,['test_bounded']*8));print('pool start + import', round(time.perf_counter()-t,2),'s');p.shutdown()"
