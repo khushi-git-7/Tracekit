@@ -88,6 +88,15 @@ CODE_MODE = [
     'await tools.exec_command({cmd: "echo deny-me"});',
     'await tools.mcp__rec_server__echo_text({text: "hello-mcp"});',
     'await tools.get_goal({});',
+    # #698 review: what exec's JavaScript can reach without a tool. fetch aims at this mock (the code-mode port), so a
+    # request that left the isolate would be logged here as a GET
+    ('const r = {fetch: typeof fetch, require: typeof require, process: typeof process, Deno: typeof Deno, '
+     'XMLHttpRequest: typeof XMLHttpRequest, WebSocket: typeof WebSocket, '
+     'globals: Object.getOwnPropertyNames(globalThis).sort()};'
+     ' try { await fetch("http://127.0.0.1:8707/probe-fetch"); r.fetch_call = "ran"; } catch (e) { r.fetch_call = String(e); }'
+     ' try { await import("node:fs"); r.import_fs = "ran"; } catch (e) { r.import_fs = String(e); }'
+     ' try { await import("http://127.0.0.1:8707/probe-import.js"); r.import_url = "ran"; } catch (e) { r.import_url = String(e); }'
+     ' text("PROBE " + JSON.stringify(r));'),
 ]
 
 
@@ -158,6 +167,9 @@ class H(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if "probe" in self.path:   # anything from inside Code Mode's exec that reached the network
+            with open(LOG, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"t": time.time(), "path": self.path, "body": {"_get": True}, "answer": None}) + chr(10))
         body = json.dumps({"object": "list", "data": [{"id": "mock", "object": "model"}], "models": []}).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
