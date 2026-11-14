@@ -81,7 +81,7 @@ else
 fi
 
 echo "== what the shim dropped from each request (field names only)"
-python3 -c "import json,collections; c=collections.Counter(tuple(json.loads(l)['dropped']) for l in open('$OUT/shim.log')); print(dict(c))" 2>&1
+python3 -c "import json,collections; c=collections.Counter(tuple(json.loads(l)['dropped']) for l in open('$OUT/shim.log')); print(dict(c)); print('signatures handed back:', sum(json.loads(l).get('restored', 0) for l in open('$OUT/shim.log')))" 2>&1
 tail -3 "$OUT/shim.stderr"
 
 echo "== tracekit last"
