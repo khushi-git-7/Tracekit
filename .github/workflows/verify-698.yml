@@ -1,0 +1,75 @@
+name: verify-698
+on:
+  push:
+    branches: [verify/698-impl]
+permissions:
+  contents: read
+env:
+  FILES: tests/test_agent_hooks.py tests/test_harness_hooks_v2.py tests/test_signer_policy.py tests/test_doctor_v2.py tests/test_readme.py tests/test_install_files.py tests/test_hook_invocation.py tests/test_hook_v2.py tests/test_constraints.py tests/test_policy2.py tests/test_audit.py tests/test_docs.py
+jobs:
+  files:
+    name: changed areas ${{ matrix.os }} ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.12"}
+          - {os: windows-latest, python: "3.13"}
+          - {os: macos-latest, python: "3.13"}
+          - {os: ubuntu-22.04, python: "3.9"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]" pyflakes
+      - name: pyflakes (make lint)
+        run: python -m pyflakes tracekit tracekit_sdk.py tests eval examples contrib integrations
+      - name: tests
+        shell: bash
+        run: python -m pytest -q -p no:cacheprovider -o faulthandler_timeout=240 $FILES
+  full:
+    name: full suite ubuntu 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q -p no:cacheprovider -o faulthandler_timeout=240
+  old:
+    name: new tests against main's code (expected to fail)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - name: main's tracekit/ with this branch's tests
+        run: |
+          git fetch -q https://github.com/Cygnux-Labs/Tracekit main
+          git checkout FETCH_HEAD -- tracekit/
+          python -m pytest -q -p no:cacheprovider tests/test_agent_hooks.py tests/test_harness_hooks_v2.py tests/test_signer_policy.py -k "interpreter or Interpreter" 2>&1 | tail -25 || true
+  evals:
+    name: policy evals (new policy hashes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - run: |
+          for e in e17_policy_corpus e21_policy_robustness e21_robustness; do python "eval/$e.py" > /dev/null; done
+          git diff -U0 eval/results/ | grep -E '^[-+] |^\+\+\+' | grep -v '"engines"\|"machine"\|latency' | head -40
