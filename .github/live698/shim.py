@@ -7,6 +7,7 @@ import http.server
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -22,6 +23,7 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 
     def forward(self, method, body=None):
+        t0 = time.time()
         req = urllib.request.Request(UPSTREAM + self.path, data=body, method=method, headers={
             "Authorization": "Bearer " + os.environ["GEMINI_API_KEY"], "Content-Type": "application/json",
             "User-Agent": "tracekit-698-live"})
@@ -35,7 +37,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 self.send_header(k, v)
         self.send_header("Connection", "close")
         self.end_headers()
-        buf = b""
+        buf, head, total = b"", b"", 0
         while True:
             chunk = r.read1(65536) if hasattr(r, "read1") else r.read(65536)
             if not chunk:
@@ -43,10 +45,16 @@ class H(http.server.BaseHTTPRequestHandler):
             self.wfile.write(chunk)
             self.wfile.flush()
             buf += chunk
+            total += len(chunk)
+            head = head or chunk[:300]
             *lines, buf = buf.split(b"\n")
             for line in lines:
                 self.remember(line)
         self.remember(buf)
+        with open(LOG + ".resp", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"status": getattr(r, "status", None) or getattr(r, "code", None),
+                                "type": r.headers.get("Content-Type"), "bytes": total,
+                                "seconds": round(time.time() - t0, 1), "head": head.decode("utf-8", "replace")}) + chr(10))
 
     @staticmethod
     def remember(line):

@@ -58,7 +58,7 @@ PROMPT='This is a test of a tool-call recorder. Use your shell tool. Do exactly 
 Then report, for each step, whether it ran or was blocked, quoting any message you got.'
 
 echo "== session 1"
-timeout 300 interpreter exec --json --skip-git-repo-check -C "$WORK" "$PROMPT" > "$OUT/session1.jsonl" 2> "$OUT/session1.stderr"
+timeout 180 interpreter exec --json --skip-git-repo-check -C "$WORK" "$PROMPT" > "$OUT/session1.jsonl" 2> "$OUT/session1.stderr"
 echo "exit $?"
 python3 .github/live698/show.py "$OUT/session1.jsonl"
 ls -la "$WORK" "$WORK/.openinterpreter" 2>&1
@@ -70,7 +70,7 @@ if [ -n "$APR" ]; then
   echo "== a person approves $APR"
   tracekit approvals approve "$APR"
   echo "== session 1 resumed"
-  timeout 300 interpreter exec --json --skip-git-repo-check -C "$WORK" resume --last \
+  timeout 180 interpreter exec --json --skip-git-repo-check -C "$WORK" resume --last \
     'The held step 3 has now been approved by a person. Retry step 3 exactly as before (the same command), once, and report whether it ran.' \
     > "$OUT/session2.jsonl" 2> "$OUT/session2.stderr"
   echo "exit $?"
@@ -83,6 +83,7 @@ fi
 echo "== what the shim dropped from each request (field names only)"
 python3 -c "import json,collections; c=collections.Counter(tuple(json.loads(l)['dropped']) for l in open('$OUT/shim.log')); print(dict(c)); print('signatures handed back:', sum(json.loads(l).get('restored', 0) for l in open('$OUT/shim.log')))" 2>&1
 tail -3 "$OUT/shim.stderr"
+echo "== Gemini responses (status, type, bytes, seconds, start)"; cut -c1-500 "$OUT/shim.log.resp" 2>&1
 
 echo "== tracekit last"
 cd "$OUT" && tracekit last --open -o last.tkb; tracekit last -o last-closed.tkb 2>&1 | tail -3
