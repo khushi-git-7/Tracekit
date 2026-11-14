@@ -59,8 +59,8 @@ tracekit init --dev --v2 --agent <name>
 
 `<name>` is `claude` (Claude Code, the default and the stable path), `codex` (Codex CLI), `cursor`, `gemini` (Gemini
 CLI), `opencode`, `kilo` (Kilo Code), `goose`, `qwen` (Qwen Code), `droid` (Factory Droid), `antigravity` (Antigravity
-CLI), `crush`, `devin` (Devin), `cline` (Cline), `gptme`, `openhands` (OpenHands), `copilot` (GitHub Copilot CLI) or
-`codebuddy` (CodeBuddy Code); all but Claude Code are experimental. Init keeps the agent's other settings and hooks. For
+CLI), `crush`, `devin` (Devin), `cline` (Cline), `gptme`, `openhands` (OpenHands), `copilot` (GitHub Copilot CLI),
+`codebuddy` (CodeBuddy Code) or `interpreter` (Open Interpreter); all but Claude Code are experimental. Init keeps the agent's other settings and hooks. For
 any other agent, tell the operator it isn't supported; don't adapt another agent's hooks.
 
 The hooks apply only to new sessions: ask the operator to start one from a new terminal, so a PATH change applies.

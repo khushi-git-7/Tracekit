@@ -2241,7 +2241,7 @@ class HarnessList(unittest.TestCase):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d, True)
         patch_env(self, HOME=d, USERPROFILE=d, XDG_CONFIG_HOME=None, CODEX_HOME=None, CRUSH_GLOBAL_CONFIG=None,
-                  CODEBUDDY_CONFIG_DIR=None)
+                  CODEBUDDY_CONFIG_DIR=None, INTERPRETER_HOME=None)
         with mock.patch("os.getcwd", return_value=d):
             for harness in agent_hooks.HARNESSES:
                 with self.subTest(harness=harness):

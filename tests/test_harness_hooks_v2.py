@@ -101,7 +101,8 @@ class Mapping(HarnessCase):
                 if self.decision == "ask":
                     self.approve_when_asked()
                 code, out, err = self.hook(harness, case["payload"], case.get("event"))   # agy: the command's event
-                self.assertEqual(code, CODEX_DENY if harness == "codex" and case["exit"] == 2 else case["exit"], err)
+                self.assertEqual(code, CODEX_DENY if harness in ("codex", "interpreter") and case["exit"] == 2
+                                 else case["exit"], err)
                 self.assertEqual(json.loads(out) if out else "", case["stdout"])
                 sent = self.sent[-1]
                 if case["request"]["tool_call_id"] is None:   # Gemini, agy, Devin: paired by the hook, never defaulted
@@ -113,6 +114,29 @@ class Mapping(HarnessCase):
 
     def test_codex(self):
         self.check("codex")
+
+    def test_interpreter(self):
+        # Open Interpreter 0.0.61's payloads, recorded on four surfaces (native over Responses and Chat, Code Mode, the
+        # claude-code harness) with a scripted model
+        self.check("interpreter")
+
+    def test_interpreter_results_prompts_and_session_events_answer_nothing(self):
+        """Built from a recorded PreToolUse payload, with the fields each event adds in the recordings (PostToolUse's
+        tool_response, UserPromptSubmit's prompt, SessionStart's source, SessionEnd's reason; Stop isn't installed):
+        none blocks, and a payload the hook can't read blocks the call (exit 2, or 0 with the JSON deny on Windows)."""
+        pre = cases("interpreter")[0]["payload"]
+        self.assertEqual(self.hook("interpreter", pre)[0], 0)
+        base = {k: pre[k] for k in ("session_id", "transcript_path", "cwd", "model", "permission_mode")}
+        for payload in (dict(pre, hook_event_name="PostToolUse", tool_response="rec698\n"),
+                        dict(base, hook_event_name="UserPromptSubmit", turn_id=pre["turn_id"], prompt="Run the plan."),
+                        dict(base, hook_event_name="SessionStart", source="startup"),
+                        dict(base, hook_event_name="Stop", turn_id=pre["turn_id"], stop_hook_active=False),
+                        dict(base, hook_event_name="SessionEnd", reason="other")):
+            with self.subTest(event=payload["hook_event_name"]):
+                self.assertEqual(self.hook("interpreter", payload)[:2], (0, ""))
+        code, out, err = self.hook("interpreter", "not json", "PreToolUse")
+        self.assertEqual(code, CODEX_DENY, err)
+        self.assertIn("deny", out)
 
     def test_cursor(self):
         self.check("cursor")
@@ -1701,6 +1725,59 @@ class CodexHookTrust(unittest.TestCase):
             f.write("[hooks.state\n")
         self.assertTrue(self.row()["detail"].startswith(f"can't confirm that Codex trusts Tracekit's hooks in "
                                                         f"{self.hooks} ({self.toml}: "))
+
+    @unittest.skipIf(sys.version_info < (3, 11), "tomllib reads Codex's config.toml")
+    def test_open_interpreter_keeps_codexs_trust_in_its_own_home(self):
+        """#698: Open Interpreter, a Codex fork, runs a hook only once it is trusted, kept as Codex keeps it, in
+        $INTERPRETER_HOME's config.toml (else ~/.openinterpreter's): recorded on 0.0.61, where a trusted_hash written
+        from _codex_hash ran every hook and an untrusted `interpreter exec` ran none, without a word. It never reads
+        CODEX_HOME."""
+        oi = os.path.join(self.home, "oi")
+        os.makedirs(oi)
+        with mock.patch.dict(os.environ, {"CODEX_HOME": os.path.join(self.home, "cx")}):
+            self.assertEqual(agent_hooks.config_path("interpreter"),
+                             os.path.join(self.home, ".openinterpreter", "hooks.json"))
+        self.assertEqual(agent_hooks.config_path("interpreter", "/repo"),
+                         os.path.join("/repo", ".openinterpreter", "hooks.json"))
+        with mock.patch.dict(os.environ, {"INTERPRETER_HOME": oi}):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), mock.patch.object(install, "init_dev", return_value={"socket": "s"}):
+                self.assertEqual(cli.main(["init", "--dev", "--v2", "--agent", "interpreter"]), 0)
+            real = os.path.realpath(oi)
+            self.hooks, self.toml = os.path.join(real, "hooks.json"), os.path.join(real, "config.toml")
+            line = out.getvalue().splitlines()[-1]
+            self.assertEqual(line, agent_hooks.codex_trust_line(harness="interpreter"))
+            self.assertIn(f"Run interpreter with INTERPRETER_HOME={oi} in a terminal, type /hooks and trust "
+                          f"Tracekit's hooks (Open Interpreter records that in {self.toml})", line)
+            self.assertIn("`interpreter exec` never asks and skips them without a word", line)
+            with open(self.hooks) as f:
+                hooks = json.load(f)["hooks"]
+            self.assertEqual(sorted(hooks), sorted(self.EVENTS.values()))
+            self.assertEqual({ev: g[0]["hooks"][0]["timeout"] for ev, g in hooks.items()},
+                             {"PreToolUse": 600, "PostToolUse": 30, "UserPromptSubmit": 30, "SessionStart": 30,
+                              "SessionEnd": 3})   # Open Interpreter holds SessionEnd to 3 s
+            self.assertEqual({ev: g[0].get("matcher") for ev, g in hooks.items() if ev.endswith("ToolUse")},
+                             {"PreToolUse": "*", "PostToolUse": "*"})
+
+            def row():
+                return next(r for r in doctor.v2_checks({"data_dir": self.home}, "dev",
+                                                        harnesses={"interpreter": self.hooks})
+                            if r["id"] == "D-INTERPRETER-HOOK-TRUST")
+            got = row()
+            self.assertEqual((got["status"], got["fix"]), (
+                "warn", f"run interpreter in a terminal, type /hooks and trust Tracekit's hooks (from {self.hooks}); "
+                        "Open Interpreter asks again whenever they change, as after tracekit init"))
+            self.assertEqual(got["detail"], "Open Interpreter skips Tracekit's PostToolUse, PreToolUse, SessionEnd, "
+                                            f"SessionStart, UserPromptSubmit hook(s) in {self.hooks}: nobody trusted "
+                                            f"them in Open Interpreter ({self.toml} records no trust), so no Open "
+                                            "Interpreter call is decided or recorded (interactive interpreter asks at "
+                                            "startup; `interpreter exec` doesn't)")
+            self.trust(*self.EVENTS)
+            self.assertEqual(row(), {"id": "D-INTERPRETER-HOOK-TRUST", "status": "ok", "fix": "",
+                                     "detail": "Open Interpreter trusts each of Tracekit's hooks in "
+                                               f"{self.hooks} as they are now ({self.toml})"})
+        self.assertEqual(agent_hooks.codex_trust_store("/home/agent", "interpreter"),   # system mode
+                         os.path.join("/home/agent", ".openinterpreter", "config.toml"))
 
     @unittest.skipIf(sys.version_info < (3, 11), "tomllib reads Codex's config.toml")
     def test_codex_home_is_where_the_hooks_and_their_trust_go(self):
