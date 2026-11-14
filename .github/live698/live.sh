@@ -55,30 +55,22 @@ PROMPT='This is a test of a tool-call recorder. Use your shell tool. Do exactly 
 1) run: echo hello-from-open-interpreter > notes.txt
 2) run: sudo echo hi
 3) run: mkdir -p .openinterpreter && echo "{}" > .openinterpreter/probe.json
-Then report, for each step, whether it ran or was blocked, quoting any message you got.'
+Then report, for each step, whether it ran, was blocked or was held and then ran, quoting any message you got.'
 
-echo "== session 1"
-timeout 180 interpreter exec --json --skip-git-repo-check -C "$WORK" "$PROMPT" > "$OUT/session1.jsonl" 2> "$OUT/session1.stderr"
+echo "== session 1, with TRACEKIT_APPROVAL_WAIT: a held call's hook waits while a person answers (interpreter exec
+# ends the run at SessionEnd, so a call held there can't be approved once the session is over)"
+export TRACEKIT_APPROVAL_WAIT=180
+( for _ in $(seq 1 120); do   # the person: approve the first held call as soon as it is listed
+    APR=$(tracekit approvals list 2>/dev/null | grep -o 'apr-[0-9a-f]*  requested' | head -1 | cut -d' ' -f1)
+    if [ -n "$APR" ]; then echo "== a person approves $APR"; tracekit approvals show "$APR" | head -8; tracekit approvals approve "$APR"; break; fi
+    sleep 2
+  done ) > "$OUT/person.txt" 2>&1 &
+PERSON=$!
+timeout 300 interpreter exec --json --skip-git-repo-check -C "$WORK" "$PROMPT" > "$OUT/session1.jsonl" 2> "$OUT/session1.stderr"
 echo "exit $?"
+wait $PERSON; cat "$OUT/person.txt"
 python3 .github/live698/show.py "$OUT/session1.jsonl"
-ls -la "$WORK" "$WORK/.openinterpreter" 2>&1
-
-echo "== tracekit approvals list"
-tracekit approvals list | tee "$OUT/approvals.txt"
-APR=$(grep -o 'apr-[0-9a-f]*  requested' "$OUT/approvals.txt" | head -1 | cut -d' ' -f1)
-if [ -n "$APR" ]; then
-  echo "== a person approves $APR"
-  tracekit approvals approve "$APR"
-  echo "== session 1 resumed"
-  timeout 180 interpreter exec --json --skip-git-repo-check -C "$WORK" resume --last \
-    'The held step 3 has now been approved by a person. Retry step 3 exactly as before (the same command), once, and report whether it ran.' \
-    > "$OUT/session2.jsonl" 2> "$OUT/session2.stderr"
-  echo "exit $?"
-  python3 .github/live698/show.py "$OUT/session2.jsonl"
-  ls -la "$WORK/.openinterpreter" 2>&1
-else
-  echo "no held call to approve"
-fi
+ls -la "$WORK" "$WORK/.openinterpreter" 2>&1; cat "$WORK/.openinterpreter/probe.json" 2>&1
 
 echo "== what the shim dropped from each request (field names only)"
 python3 -c "import json,collections; c=collections.Counter(tuple(json.loads(l)['dropped']) for l in open('$OUT/shim.log')); print(dict(c)); print('signatures handed back:', sum(json.loads(l).get('restored', 0) for l in open('$OUT/shim.log')))" 2>&1
