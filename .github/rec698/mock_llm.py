@@ -160,8 +160,9 @@ def subagent_call(body, tools):
         return None if n else ("exec_command", tools["exec_command"][0], {"cmd": "echo from-subagent"}, n)
     spawn = next((t for t in tools if t.endswith("spawn_agent")), None)
     if n == 0 and spawn:
-        return spawn, tools[spawn][0], {"message": TASK, "items": [
-            {"type": "local_image", "path": os.path.join(WORK, "pic.png")}, {"type": "text", "text": "context"}]}, n
+        # message or items, not both (0.0.61): the task goes in as a text item, beside a local image
+        return spawn, tools[spawn][0], {"items": [
+            {"type": "text", "text": TASK}, {"type": "local_image", "path": os.path.join(WORK, "pic.png")}]}, n
     if n == 1:
         return "exec_command", tools["exec_command"][0], {"cmd": "sleep 15"}, n
     return None
