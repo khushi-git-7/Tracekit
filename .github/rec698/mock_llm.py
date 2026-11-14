@@ -146,10 +146,33 @@ def done_count(body):
                i.get("type") in ("function_call_output", "custom_tool_call_output"))
 
 
+TASK = "SUBAGENT-TASK: run echo from-subagent"
+
+
+def subagent_call(body, tools):
+    """Round 6 (MOCK_MODE=subagent, Chat): the main agent spawns a sub-agent with a local_image item, then waits; the
+    sub-agent (its first message is TASK, and its own history has no spawn) runs one command. Do its calls fire hooks?"""
+    text = json.dumps(body)
+    spawned = any(tc.get("function", {}).get("name", "").endswith("spawn_agent")
+                  for m in body.get("messages") or [] for tc in m.get("tool_calls") or [])
+    n = done_count(body)
+    if TASK in text and not spawned:   # the sub-agent
+        return None if n else ("exec_command", tools["exec_command"][0], {"cmd": "echo from-subagent"}, n)
+    spawn = next((t for t in tools if t.endswith("spawn_agent")), None)
+    if n == 0 and spawn:
+        return spawn, tools[spawn][0], {"message": TASK, "items": [
+            {"type": "local_image", "path": os.path.join(WORK, "pic.png")}, {"type": "text", "text": "context"}]}, n
+    if n == 1:
+        return "exec_command", tools["exec_command"][0], {"cmd": "sleep 15"}, n
+    return None
+
+
 def next_call(body):
     tools = offered(body)
     if not tools:
         return None
+    if os.environ.get("MOCK_MODE") == "subagent":
+        return subagent_call(body, tools)
     if "functions__exec" in tools:
         n = done_count(body)
         return None if n >= len(CODE_MODE) else ("exec", tools["functions__exec"][0], {"input": CODE_MODE[n]}, n)

@@ -39,15 +39,17 @@ jobs:
         run: |
           chmod +x .github/rec698/run.sh
           interpreter features list || true
-          # round 5 (#698 review): Code Mode only, with the exec reach probe; rounds 1-4 recorded the rest
-          .github/rec698/run.sh code-mode 8707 responses none gpt-5.6-sol bypass
+          # round 6 (#698): does a sub-agent's call fire the hooks, and what do spawn_agent's items carry?
+          mkdir -p "$RUNNER_TEMP/work-subagent"
+          python3 -c "import base64,sys; open(sys.argv[1],'wb').write(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))" "$RUNNER_TEMP/work-subagent/pic.png"
+          MOCK_MODE=subagent .github/rec698/run.sh subagent 8708 chat none gpt-5.1-codex bypass
       - name: what exec's JavaScript reached without a tool
         env:
           OUT: ${{ runner.temp }}/rec698
         run: |
           python3 - <<'EOF'
           import json, os
-          reqs = [json.loads(l) for l in open(os.path.join(os.environ["OUT"], "code-mode", "requests.jsonl"))]
+          reqs = []
           print("GETs from inside exec that reached the mock:", [r["path"] for r in reqs if r["body"] == {"_get": True}])
           for r in reqs:
               s = json.dumps(r["body"])

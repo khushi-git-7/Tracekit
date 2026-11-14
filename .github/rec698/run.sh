@@ -76,7 +76,7 @@ print("answers:", [r["answer"] and r["answer"]["name"] for r in reqs])
 try:
     for l in open(os.path.join(d, "events.jsonl")):
         e = json.loads(l); p = e["payload"] or {}
-        print(" ", e["argv"], p.get("tool_name", ""), json.dumps(p.get("tool_input"))[:160] if "tool_input" in p else "",
+        print(" ", e["argv"], str(p.get("session_id"))[-8:], p.get("tool_name", ""), json.dumps(p.get("tool_input"))[:160] if "tool_input" in p else "",
               "| keys:", sorted(p))
 except FileNotFoundError:
     print("  no hook events")
