@@ -14,6 +14,11 @@ r = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/mod
 print("models list:", urllib.request.urlopen(r, timeout=30).status)
 EOF
 
+echo "== a local shim for Gemini's OpenAI-compatible endpoint, which rejects Open Interpreter's \`store\` field"
+python3 .github/live698/shim.py 8790 > "$OUT/shim.stderr" 2>&1 &
+export SHIM_KEY=unused
+sleep 1
+
 echo "== tracekit init --dev --v2 --agent interpreter"
 tracekit init --dev --v2 --agent interpreter
 cat > "$INTERPRETER_HOME/config.toml" <<EOF
@@ -25,8 +30,8 @@ check_for_update_on_startup = false
 
 [model_providers.gemini]
 name = "Gemini (free tier)"
-base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
-env_key = "GEMINI_API_KEY"
+base_url = "http://127.0.0.1:8790/v1beta/openai"
+env_key = "SHIM_KEY"
 wire_api = "chat"
 EOF
 
@@ -74,6 +79,10 @@ if [ -n "$APR" ]; then
 else
   echo "no held call to approve"
 fi
+
+echo "== what the shim dropped from each request (field names only)"
+python3 -c "import json,collections; c=collections.Counter(tuple(json.loads(l)['dropped']) for l in open('$OUT/shim.log')); print(dict(c))" 2>&1
+tail -3 "$OUT/shim.stderr"
 
 echo "== tracekit last"
 cd "$OUT" && tracekit last --open -o last.tkb; tracekit last -o last-closed.tkb 2>&1 | tail -3
