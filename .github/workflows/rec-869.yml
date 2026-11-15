@@ -1,0 +1,68 @@
+name: rec-869
+on:
+  push:
+    branches: [verify/869-record]
+permissions:
+  contents: read
+jobs:
+  record:
+    name: record a Qwen Code session for tracekit audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OUT: ${{ runner.temp }}/rec869
+      WORK: ${{ runner.temp }}/work869
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: python -m pip install -e .
+      - name: install Qwen Code
+        run: |
+          npm install -g @qwen-code/qwen-code@latest
+          npm ls -g @qwen-code/qwen-code
+          qwen --version
+          qwen --help
+      - name: where Qwen Code keeps its files (from its own source)
+        run: |
+          D=$(npm root -g)/@qwen-code/qwen-code
+          ls "$D"; ls "$D"/dist 2>/dev/null | head
+          grep -rhoE "process\.env\.[A-Z_]*(HOME|DIR)[A-Z_]*" "$D" --include=*.js | sort | uniq -c | sort -rn | head -30
+          grep -rhoE ".{120}(getGlobalTempDir|getProjectTempDir|chats|session-).{120}" "$D" --include=*.js | grep -iE "qwen|tmp|chats" | head -25
+      - name: record
+        run: |
+          mkdir -p "$OUT" "$WORK" ~/.qwen
+          printf '%s\n' '{"selectedAuthType":"openai","security":{"auth":{"selectedType":"openai"}},"model":{"name":"rec-model"}}' > ~/.qwen/settings.json
+          touch "$RUNNER_TEMP/marker"; sleep 1
+          chmod +x .github/rec869/run.sh
+          # round 1: a new session, write, read, edit and a shell command
+          .github/rec869/run.sh first 8791 write,read,edit,shell -p "Make notes.txt, read it, change one to uno, then run echo." --yolo
+          # round 2: the same session resumed, one more shell command
+          .github/rec869/run.sh resumed 8792 shell2 --continue -p "Run one more echo." --yolo || true
+          # round 2b: if --continue isn't an option, --resume
+          grep -q "Unknown argument" "$OUT/resumed/stderr.txt" && .github/rec869/run.sh resumed2 8793 shell2 --resume -p "Run one more echo." --yolo || true
+      - name: the files the sessions wrote
+        run: |
+          echo "--- every file under ~ written by the runs (not node_modules, npm or caches)"
+          find ~ -newer "$RUNNER_TEMP/marker" -type f -not -path '*/node_modules/*' -not -path '*/.npm/*' -not -path '*/.cache/*' 2>/dev/null | head -100
+          mkdir -p "$OUT/home-qwen"; cp -r ~/.qwen "$OUT/home-qwen/" 2>/dev/null
+          for f in $(find ~/.qwen -newer "$RUNNER_TEMP/marker" -type f \( -name '*.json' -o -name '*.jsonl' \) | head -20); do
+            echo "=================== $f ($(wc -c < "$f") bytes, $(wc -l < "$f") lines)"; head -c 6000 "$f"; echo
+          done
+      - name: tracekit audit on what was written
+        run: |
+          for root in ~/.qwen/tmp ~/.qwen ~/.qwen/projects; do
+            [ -d "$root" ] || continue
+            echo "=== tracekit audit $root --agent gemini"; tracekit audit "$root" --agent gemini --json 2>&1 | head -80
+          done
+          echo "=== tracekit audit --agent qwen"; tracekit audit --agent qwen 2>&1 | head -20
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rec869
+          path: ${{ runner.temp }}/rec869
+          include-hidden-files: true
