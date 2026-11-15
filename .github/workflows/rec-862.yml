@@ -32,46 +32,21 @@ jobs:
           OUT: ${{ runner.temp }}/rec862
         run: |
           chmod +x .github/rec862/run.sh
-          # round 2: round 1's shell variable alone left Code Mode off in -p; try it from each settings file
+          # round 3: Code Mode's own verdict, interactive, CI unset, on a 5.5 model; against the mock and against
+          # api.anthropic.com with a key that isn't one (so nothing is billed)
+          chmod +x .github/rec862/run_tty.sh
+          MOCK_PLAN='[]' .github/rec862/run_tty.sh tty-mock 8731 claude-sonnet-5-5 mock
+          MOCK_PLAN='[]' .github/rec862/run_tty.sh tty-anthropic 8732 claude-sonnet-5-5 anthropic
+          # round 2 (kept): -p with the variable from each settings file
           ON='{"env": {"CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "1"}}'
-          MOCK_PLAN='[]' .github/rec862/run.sh base 8721 claude-sonnet-4-5 0
-          MOCK_PLAN='[]' EXTRA_SETTINGS="$ON" .github/rec862/run.sh flag 8722 claude-sonnet-4-5 0
-          MOCK_PLAN='[]' USER_SETTINGS="$ON" .github/rec862/run.sh user 8723 claude-sonnet-4-5 0
-          MOCK_PLAN='[]' PROJECT_SETTINGS="$ON" .github/rec862/run.sh project 8724 claude-sonnet-4-5 0
-          MOCK_PLAN='[]' USER_SETTINGS="$ON" .github/rec862/run.sh user-shell 8725 claude-sonnet-4-5 1
-          MOCK_PLAN='[]' .github/rec862/run.sh shell-true 8726 claude-sonnet-4-5 true
-          for l in base flag user project user-shell shell-true; do
+          MOCK_PLAN='[]' USER_SETTINGS="$ON" .github/rec862/run.sh user 8723 claude-sonnet-5-5 0
+          for l in user; do
             echo "== $l init tools:"; head -20 "$OUT/$l/out.jsonl" | python3 -c "import json,sys
           for l in sys.stdin:
               m = json.loads(l)
               if m.get('subtype') == 'init': print(m.get('tools'))
               if m.get('type') == 'system' and m.get('subtype') not in ('init', 'hook_started', 'hook_response'): print(l[:600])"
           done
-      - name: the Code Mode tool as offered
-        env:
-          OUT: ${{ runner.temp }}/rec862
-        run: |
-          python3 - <<'EOF'
-          import json, os
-          for label in ("flag", "user", "project", "user-shell", "shell-true"):
-              path = os.path.join(os.environ["OUT"], label, "requests.jsonl")
-              if not os.path.exists(path):
-                  print(label, "no requests"); continue
-              base = set()
-              for l in open(os.path.join(os.environ["OUT"], "base", "requests.jsonl")):
-                  base |= {t.get("name") for t in json.loads(l).get("body", {}).get("tools") or []}
-              seen = set()
-              for l in open(path):
-                  r = json.loads(l)
-                  for t in r.get("body", {}).get("tools") or []:
-                      if t.get("name") in seen or t.get("name") in base:
-                          continue
-                      seen.add(t.get("name"))
-                      print("==", label, "new tool:", t.get("name"))
-                      print(json.dumps(t, indent=1)[:12000])
-              print("==", label, "tools no longer offered:", sorted(base - {t.get("name") for l in open(path)
-                    for t in json.loads(l).get("body", {}).get("tools") or []}))
-          EOF
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
