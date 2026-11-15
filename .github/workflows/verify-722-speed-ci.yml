@@ -1,0 +1,109 @@
+name: verify-722-speed-ci
+on:
+  push:
+    branches: [verify/722-speed-ci]
+permissions:
+  contents: read
+jobs:
+  before:
+    name: before py${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # a hung test must fail the job, not hold a runner for six hours
+    timeout-minutes: 90
+    env:
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
+    # Linux is the supported platform for system mode; macOS and Windows run dev mode and are
+    # reported but do not block merges until their runs are green
+    continue-on-error: ${{ matrix.os != 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        python: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch the release tags (tests/test_released_verifiers.py runs their verifiers)
+        run: git fetch --no-tags --depth=1 origin "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: python -m pyflakes tracekit tracekit_sdk.py tests eval examples
+      - name: Test
+        run: python -m pytest -v -o faulthandler_timeout=240
+
+  after:
+    name: after py${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # a hung test must fail the job, not hold a runner for six hours
+    timeout-minutes: 90
+    env:
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
+    # Linux is the supported platform for system mode; macOS and Windows run dev mode and are
+    # reported but do not block merges until their runs are green
+    continue-on-error: ${{ matrix.os != 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        python: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch the release tags (tests/test_released_verifiers.py runs their verifiers)
+        run: git fetch --no-tags --depth=1 origin "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: python -m pyflakes tracekit tracekit_sdk.py tests eval examples
+      - name: Test
+        # the Speed test runs in its own job below, so this one isn't held up by it
+        run: >-
+          python -m pytest -v -o faulthandler_timeout=240
+          --deselect tests/test_policy2.py::Speed::test_every_pack_pattern_searches_64_kib_within_budget
+
+  speed:
+    # the fallback engine's backtracking guard: every shipped pattern against ~119,000 fillers of 64 KiB, in a process
+    # pool (#722). It took 162-307 s on these runners, so its own job, alongside the test job, takes that off the
+    # test job's time. Every Python and OS of the test job, since each installs its own `regex` build
+    name: Speed py${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # about three times the slowest run measured: a pattern that starts backtracking fails here in minutes, not at 90
+    timeout-minutes: 15
+    env:
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
+    continue-on-error: ${{ matrix.os != 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+        python: ["3.9", "3.12", "3.13"]
+        exclude:
+          - {os: macos-latest, python: "3.12"}
+          - {os: windows-latest, python: "3.12"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Speed
+        # tracebacks of a stuck run are dumped before the job's timeout ends it
+        run: >-
+          python -m pytest -v -o faulthandler_timeout=600
+          tests/test_policy2.py::Speed::test_every_pack_pattern_searches_64_kib_within_budget
+
