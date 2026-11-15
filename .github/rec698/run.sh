@@ -53,7 +53,7 @@ sleep 1
 FLAGS=(exec --json --skip-git-repo-check -C "$WORK")
 [ "$TRUST" = bypass ] && FLAGS+=(--dangerously-bypass-hook-trust)
 FLAGS+=("$@")
-timeout 300 interpreter "${FLAGS[@]}" "Run the recording plan." > "$REC_DIR/exec.jsonl" 2> "$REC_DIR/exec.stderr"
+timeout "${REC_TIMEOUT:-300}" interpreter "${FLAGS[@]}" "Run the recording plan." > "$REC_DIR/exec.jsonl" 2> "$REC_DIR/exec.stderr"
 echo "exit $?" > "$REC_DIR/exit"
 kill $MOCK 2>/dev/null
 ls -la "$WORK" > "$REC_DIR/workdir.txt"
