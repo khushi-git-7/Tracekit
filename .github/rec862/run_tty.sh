@@ -17,6 +17,19 @@ s = json.load(open(hooks))
 s["env"] = {"CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "1"}
 json.dump(s, open(f"{cfg}/settings.json", "w"), indent=2)
 PY
+# first-run screens done ahead, so the session gets as far as Code Mode's own check; CAVEATS=1 also marks Code Mode's
+# caveats as read
+python3 - "$CFG" "$WORK" <<'PY'
+import json, os, sys
+cfg, work = sys.argv[1], os.path.realpath(sys.argv[2])
+key = "sk-ant-rec862-not-a-key"
+state = {"hasCompletedOnboarding": True, "theme": "dark", "numStartups": 5, "bypassPermissionsModeAccepted": True,
+         "customApiKeyResponses": {"approved": [key[-20:]], "rejected": []},
+         "projects": {work: {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}}}
+if os.environ.get("CAVEATS") == "1":
+    state.update(codeModeCaveatsAcceptedV1=True)
+json.dump(state, open(f"{cfg}/.claude.json", "w"), indent=2)
+PY
 python3 "$KIT/mock.py" "$PORT" > "$REC_DIR/mock.log" 2>&1 &
 MOCK=$!
 sleep 1

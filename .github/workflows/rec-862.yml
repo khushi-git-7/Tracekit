@@ -35,8 +35,10 @@ jobs:
           # round 3: Code Mode's own verdict, interactive, CI unset, on a 5.5 model; against the mock and against
           # api.anthropic.com with a key that isn't one (so nothing is billed)
           chmod +x .github/rec862/run_tty.sh
+          # round 3b: with the first-run screens done ahead
           MOCK_PLAN='[]' .github/rec862/run_tty.sh tty-mock 8731 claude-sonnet-5-5 mock
           MOCK_PLAN='[]' .github/rec862/run_tty.sh tty-anthropic 8732 claude-sonnet-5-5 anthropic
+          MOCK_PLAN='[]' CAVEATS=1 .github/rec862/run_tty.sh tty-mock-caveats 8733 claude-sonnet-5-5 mock
           # round 2 (kept): -p with the variable from each settings file
           ON='{"env": {"CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "1"}}'
           MOCK_PLAN='[]' USER_SETTINGS="$ON" .github/rec862/run.sh user 8723 claude-sonnet-5-5 0
