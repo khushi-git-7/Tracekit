@@ -16,10 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, python: "3.9"}
-          - {os: ubuntu-latest, python: "3.12"}
-          - {os: ubuntu-latest, python: "3.13"}
-          - {os: windows-latest, python: "3.13"}
+          - {os: ubuntu-22.04, python: "3.9"}   # ubuntu-latest (26.04) has no 3.9; the other jobs ran at ba7d0dc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,7 +29,7 @@ jobs:
         shell: bash
         run: |
           git log --oneline -3
-          git show HEAD~2:tests/test_view.py > /tmp/main_view.py
+          git show HEAD~3:tests/test_view.py > /tmp/main_view.py
           cp tests/test_view.py /tmp/fix_view.py
           cp /tmp/main_view.py tests/test_view.py
           for i in 1 2 3; do python -m pytest -q -p no:cacheprovider --durations=0 "$T1" "$T2" 2>&1 | grep -E "s call|passed|failed|skipped"; done
