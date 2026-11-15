@@ -9,10 +9,11 @@ jobs:
     name: record a Qwen Code session for tracekit audit
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    env:
-      OUT: ${{ runner.temp }}/rec869
-      WORK: ${{ runner.temp }}/work869
     steps:
+      - name: folders
+        run: |
+          echo "OUT=$RUNNER_TEMP/rec869" >> "$GITHUB_ENV"
+          echo "WORK=$RUNNER_TEMP/work869" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -53,6 +54,44 @@ jobs:
           for f in $(find ~/.qwen -newer "$RUNNER_TEMP/marker" -type f \( -name '*.json' -o -name '*.jsonl' \) | head -20); do
             echo "=================== $f ($(wc -c < "$f") bytes, $(wc -l < "$f") lines)"; head -c 6000 "$f"; echo
           done
+      - name: each recorded call as Qwen's hook maps it
+        run: |
+          python - <<'PY'
+          import json, os
+          from tracekit import agent_hooks
+          def walk(o):
+              if isinstance(o, dict):
+                  if isinstance(o.get("name"), str) and isinstance(o.get("args"), dict):
+                      yield o
+                  for v in o.values():
+                      yield from walk(v)
+              elif isinstance(o, list):
+                  for v in o:
+                      yield from walk(v)
+          for dp, _, fs in os.walk(os.path.expanduser("~/.qwen")):
+              for f in fs:
+                  if not f.endswith((".json", ".jsonl")):
+                      continue
+                  path = os.path.join(dp, f)
+                  try:
+                      text = open(path, encoding="utf-8").read()
+                  except OSError:
+                      continue
+                  docs = []
+                  for line in (text.splitlines() if f.endswith(".jsonl") else [text]):
+                      try:
+                          docs.append(json.loads(line))
+                      except ValueError:
+                          pass
+                  seen = set()
+                  for d in docs:
+                      for c in walk(d):
+                          k = (c.get("id"), c["name"], json.dumps(c["args"], sort_keys=True))
+                          if k in seen:
+                              continue
+                          seen.add(k)
+                          print(path, "|", c.get("id"), c["name"], "->", agent_hooks.tool("qwen", c["name"], c["args"]))
+          PY
       - name: tracekit audit on what was written
         run: |
           for root in ~/.qwen/tmp ~/.qwen ~/.qwen/projects; do
