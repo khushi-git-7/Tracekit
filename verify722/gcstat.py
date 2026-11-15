@@ -35,6 +35,10 @@ def _hooks(tag):
 
 
 def pytest_sessionstart(session):
+    import os
+    th = os.environ.get("GC_THRESHOLD")
+    if th:
+        gc.set_threshold(*map(int, th.split(",")))
     gc.callbacks.append(_cb)
     _hooks("start")
 

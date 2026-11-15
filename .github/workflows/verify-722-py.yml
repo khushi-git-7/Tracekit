@@ -28,14 +28,17 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           FILES="tests/test_canon.py tests/test_constraints.py tests/test_audit.py tests/test_findings_box.py"
+          run() {   # $1 python, $2 label, $3 GC_THRESHOLD or empty
+            echo "=== round $r $2"
+            s=$(date +%s.%N)
+            GC_THRESHOLD="$3" /tmp/v$1/bin/python -m pytest -q -p no:cacheprovider -p verify722.gcstat -o faulthandler_timeout=240 $FILES | grep -E "gcstat|passed|failed" || true
+            e=$(date +%s.%N)
+            echo "=== round $r $2 wall $(python3 -c "print(round($e-$s,1))") s"
+          }
           for r in 1 2 3; do
-            if [ $((r % 2)) = 1 ]; then order="3.12 3.13"; else order="3.13 3.12"; fi
-            for v in $order; do
-              echo "=== round $r python $v bench"
-              /tmp/v$v/bin/python verify722/bench.py
-              s=$(date +%s.%N)
-              /tmp/v$v/bin/python -m pytest -q -p no:cacheprovider -p verify722.gcstat --durations=8 -o faulthandler_timeout=240 $FILES | grep -E "gcstat|passed|failed|s call|s setup" || true
-              e=$(date +%s.%N)
-              echo "=== round $r python $v tests wall $(python3 -c "print(round($e-$s,1))") s"
-            done
+            case $r in
+              1) run 3.12 "3.12 default" ""; run 3.12 "3.12 at 2000" "2000,10,10"; run 3.13 "3.13 default" "" ;;
+              2) run 3.13 "3.13 default" ""; run 3.12 "3.12 default" ""; run 3.12 "3.12 at 2000" "2000,10,10" ;;
+              3) run 3.12 "3.12 at 2000" "2000,10,10"; run 3.13 "3.13 default" ""; run 3.12 "3.12 default" "" ;;
+            esac
           done
