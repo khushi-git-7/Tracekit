@@ -1,0 +1,68 @@
+name: rec-862
+on:
+  push:
+    branches: [verify/862-record]
+permissions:
+  contents: read
+jobs:
+  record:
+    name: record Claude Code Code Mode hook payloads
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CC_VERSION: 2.1.325
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: install Claude Code ${{ env.CC_VERSION }}
+        run: |
+          node --version
+          npm install -g "@anthropic-ai/claude-code@$CC_VERSION"
+          claude --version
+      - name: Code Mode's own text in the package
+        run: |
+          ROOT=$(npm root -g)/@anthropic-ai
+          ls -la "$ROOT" "$ROOT"/* | head -40
+          for f in $(grep -rlas "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE" "$ROOT" | head -5); do
+            echo "== $f"
+            grep -aoE ".{0,400}CLAUDE_CODE_EXPERIMENTAL_CODE_MODE.{0,400}" "$f" | head -8
+            grep -aoE ".{0,600}refused when a PreToolUse hook.{0,1200}" "$f" | head -3
+          done
+      - name: record
+        env:
+          OUT: ${{ runner.temp }}/rec862
+        run: |
+          chmod +x .github/rec862/run.sh
+          # round 1: which tools each mode offers, and the Code Mode tool's schema and description
+          MOCK_PLAN='[]' .github/rec862/run.sh base 8721 claude-sonnet-4-5 0
+          MOCK_PLAN='[]' .github/rec862/run.sh cm 8722 claude-sonnet-4-5 1
+          MOCK_PLAN='[]' .github/rec862/run.sh cm-opus 8723 claude-opus-4-5 1
+      - name: the Code Mode tool as offered
+        env:
+          OUT: ${{ runner.temp }}/rec862
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          for label in ("cm", "cm-opus"):
+              path = os.path.join(os.environ["OUT"], label, "requests.jsonl")
+              if not os.path.exists(path):
+                  print(label, "no requests"); continue
+              base = set()
+              for l in open(os.path.join(os.environ["OUT"], "base", "requests.jsonl")):
+                  base |= {t.get("name") for t in json.loads(l).get("body", {}).get("tools") or []}
+              seen = set()
+              for l in open(path):
+                  r = json.loads(l)
+                  for t in r.get("body", {}).get("tools") or []:
+                      if t.get("name") in seen or t.get("name") in base:
+                          continue
+                      seen.add(t.get("name"))
+                      print("==", label, "new tool:", t.get("name"))
+                      print(json.dumps(t, indent=1)[:12000])
+              print("==", label, "tools no longer offered:", sorted(base - {t.get("name") for l in open(path)
+                    for t in json.loads(l).get("body", {}).get("tools") or []}))
+          EOF
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rec862
+          path: ${{ runner.temp }}/rec862
