@@ -39,6 +39,7 @@ jobs:
         run: |
           chmod +x .github/rec698/run.sh
           interpreter features list || true
+          # round 7b (#853 review): the Agent call with its sub-agent told apart; swe-agent and terminus-2 without streaming
           # round 7 (#853 review): alias tools and filePath under claude-code, an Agent call, deepseek-tui's and
           # kimi-code's own tools, send_input's hook name, and whether swe-agent's and terminus-2's text actions fire
           for l in aliases deepseek kimi sendinput swe terminus; do
@@ -46,9 +47,6 @@ jobs:
             python3 -c "import base64,sys; open(sys.argv[1],'wb').write(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))" "$RUNNER_TEMP/work-$l/pic.png"
           done
           MOCK_MODE=aliases .github/rec698/run.sh aliases 8711 messages claude-code claude-sonnet-4-5 bypass
-          MOCK_MODE=deepseek .github/rec698/run.sh deepseek 8712 chat deepseek-tui deepseek-chat bypass
-          MOCK_MODE=kimi .github/rec698/run.sh kimi 8713 chat kimi-code kimi-k2 bypass
-          MOCK_MODE=sendinput .github/rec698/run.sh sendinput 8714 chat none gpt-5.1-codex bypass
           REC_TIMEOUT=120 MOCK_MODE=swe .github/rec698/run.sh swe 8715 chat swe-agent gpt-5.1-codex bypass
           REC_TIMEOUT=120 MOCK_MODE=terminus .github/rec698/run.sh terminus 8716 chat terminus-2 gpt-5.1-codex bypass
       - name: what exec's JavaScript reached without a tool

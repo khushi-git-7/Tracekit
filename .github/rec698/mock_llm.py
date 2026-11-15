@@ -224,8 +224,8 @@ def last_result_id(body):
 
 
 def scripted_call(body, tools, mode):
-    if mode == "aliases" and is_sub_start(body, "SUBAGENT-TASK"):
-        return "Bash", "function", {"command": "echo from-agent"}, "sub"
+    if mode == "aliases" and "AskUserQuestion" not in tools:   # the Agent's sub-agent (round 7: no AskUserQuestion)
+        return ("Bash", "function", {"command": "echo from-agent"}, "sub") if done_count(body) == 0 else None
     if last_result_id(body) in SUB_IDS:
         return None
     steps = SCRIPTS[mode]
@@ -387,7 +387,7 @@ class H(BaseHTTPRequestHandler):
             delta, fin = {"role": "assistant", "content": reply}, "stop"
         base = {"id": "chatcmpl-" + cid, "object": "chat.completion.chunk", "created": int(time.time()),
                 "model": body.get("model", "mock") if isinstance(body, dict) else "mock"}
-        if isinstance(body, dict) and body.get("stream") is False:
+        if isinstance(body, dict) and not body.get("stream"):
             msg = {k: v for k, v in delta.items()}
             out = json.dumps({**base, "object": "chat.completion", "choices": [
                 {"index": 0, "message": msg, "finish_reason": fin}],
