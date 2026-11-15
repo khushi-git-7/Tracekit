@@ -1,5 +1,5 @@
 """Write the recording's Claude Code settings: settings.py KIT OUT. Every hook event runs rec_hook.py."""
-import json, sys
+import json, os, sys
 
 kit, out = sys.argv[1], sys.argv[2]
 events = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "UserPromptSubmit", "SessionStart",
@@ -11,5 +11,9 @@ for ev in events:
     if ev in tool_events:
         group["matcher"] = "*"
     hooks[ev] = [group]
+settings = {"hooks": hooks}
+extra = os.environ.get("EXTRA_SETTINGS")   # JSON merged into the settings, e.g. {"env": {...}}
+if extra:
+    settings.update(json.loads(extra))
 with open(out, "w") as f:
-    json.dump({"hooks": hooks}, f, indent=2)
+    json.dump(settings, f, indent=2)
