@@ -31,9 +31,10 @@ jobs:
       - name: where Qwen Code keeps its files (from its own source)
         run: |
           D=$(npm root -g)/@qwen-code/qwen-code
-          ls "$D"; ls "$D"/dist 2>/dev/null | head
-          grep -rhoE "process\.env\.[A-Z_]*(HOME|DIR)[A-Z_]*" "$D" --include=*.js | sort | uniq -c | sort -rn | head -30
-          grep -rhoE ".{120}(getGlobalTempDir|getProjectTempDir|chats|session-).{120}" "$D" --include=*.js | grep -iE "qwen|tmp|chats" | head -25
+          grep -rhoE ".{0,300}runtimeBaseDir *=.{0,300}" "$D" --include=*.js | head -8
+          grep -rhoE ".{0,200}(QWEN_HOME|QWEN_DIR|QWEN_CONFIG_DIR|QWEN_RUNTIME_DIR|QWEN_CODE_HOME|QWEN_DATA_DIR)[A-Z_]*.{0,200}" "$D" --include=*.js | head -12
+          grep -rhoE "\"QWEN_[A-Z_]*\"|process\.env\.QWEN_[A-Z_]*|env\[\"QWEN_[A-Z_]*\"\]" "$D" --include=*.js | sort | uniq -c | sort -rn | head -40
+          grep -rhoE ".{0,200}(PROJECT_DIR_NAME|getProjectId|sanitizeCwd|projectId *=).{0,200}" "$D" --include=*.js | head -6
       - name: record
         run: |
           mkdir -p "$OUT" "$WORK" ~/.qwen
@@ -46,6 +47,15 @@ jobs:
           .github/rec869/run.sh resumed 8792 shell2 --continue -p "Run one more echo." --yolo || true
           # round 2b: if --continue isn't an option, --resume
           grep -q "Unknown argument" "$OUT/resumed/stderr.txt" && .github/rec869/run.sh resumed2 8793 shell2 --resume -p "Run one more echo." --yolo || true
+          # round 3: a second, new session in the same project: a second file?
+          .github/rec869/run.sh second 8794 shell2 -p "Run one echo." --yolo || true
+          # round 4: each candidate home variable, if Qwen Code reads one, moves the files?
+          for v in QWEN_HOME QWEN_DIR QWEN_CONFIG_DIR QWEN_RUNTIME_DIR QWEN_CODE_HOME QWEN_DATA_DIR; do
+            mkdir -p "$RUNNER_TEMP/home-$v/.qwen"; cp ~/.qwen/settings.json "$RUNNER_TEMP/home-$v/" "$RUNNER_TEMP/home-$v/.qwen/"
+            env "$v=$RUNNER_TEMP/home-$v" .github/rec869/run.sh "env-$v" 8795 shell2 -p "Run one echo." --yolo >/dev/null 2>&1 || true
+            echo "--- $v: session files under $RUNNER_TEMP/home-$v:"; find "$RUNNER_TEMP/home-$v" -name '*.jsonl' -path '*chats*' | head
+          done
+          echo "--- session files under ~/.qwen now:"; find ~/.qwen -name '*.jsonl' -path '*chats*'
       - name: the files the sessions wrote
         run: |
           echo "--- every file under ~ written by the runs (not node_modules, npm or caches)"
