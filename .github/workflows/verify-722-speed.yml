@@ -1,0 +1,44 @@
+name: verify-722-speed
+on:
+  push:
+    branches: [verify/722-speed]
+  workflow_dispatch:
+jobs:
+  prof:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.12"}
+          - {os: ubuntu-latest, python: "3.13"}
+          - {os: ubuntu-22.04, python: "3.9"}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: nproc; python -c "import os;print(len(os.sched_getaffinity(0)))"
+      - name: the test as in CI
+        run: python -m pytest -v --durations=0 "tests/test_policy2.py::Speed::test_every_pack_pattern_searches_64_kib_within_budget"
+      - name: profile
+        run: python tests/prof_speed_722.py
+      - name: cProfile of one worker-sized slice (the 3 slowest patterns, in-process)
+        run: |
+          python - <<'PY'
+          import cProfile, pstats, os, sys, time, functools
+          sys.path.insert(0, "tests")
+          import test_policy2 as tp
+          pats = tp.pack_patterns(); scale = tp.machine_scale()
+          t=[]
+          for p in pats:
+              s=time.perf_counter(); tp._over_budget(p, scale); t.append((time.perf_counter()-s,p))
+          t.sort(reverse=True)
+          print("in-process total", round(sum(x for x,_ in t),1), "s over", len(t), "patterns")
+          print("top10", [(round(x,2), p[0], p[1]) for x,p in t[:10]])
+          pr=cProfile.Profile(); pr.enable()
+          for _,p in t[:3]: tp._over_budget(p, scale)
+          pr.disable(); pstats.Stats(pr).sort_stats("cumulative").print_stats(15)
+          PY
