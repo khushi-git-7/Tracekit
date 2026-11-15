@@ -1,0 +1,41 @@
+name: verify-722-py
+on:
+  push:
+    branches: [verify/722-py]
+  workflow_dispatch:
+jobs:
+  same-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: |
+            3.12
+            3.13
+      - name: runner
+        run: |
+          nproc; grep -m1 "model name" /proc/cpuinfo; head -2 /etc/os-release
+          which python3.12 python3.13; python3.12 -VV; python3.13 -VV
+      - name: two venvs, same tree
+        run: |
+          for v in 3.12 3.13; do python$v -m venv /tmp/v$v; /tmp/v$v/bin/python -m pip install -q -e ".[dev]"; done
+          for v in 3.12 3.13; do /tmp/v$v/bin/python -m pip freeze > /tmp/freeze-$v.txt; done
+          diff /tmp/freeze-3.12.txt /tmp/freeze-3.13.txt || true
+      - name: interleaved rounds
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          FILES="tests/test_canon.py tests/test_constraints.py tests/test_audit.py tests/test_findings_box.py"
+          for r in 1 2 3; do
+            if [ $((r % 2)) = 1 ]; then order="3.12 3.13"; else order="3.13 3.12"; fi
+            for v in $order; do
+              echo "=== round $r python $v bench"
+              /tmp/v$v/bin/python verify722/bench.py
+              s=$(date +%s.%N)
+              /tmp/v$v/bin/python -m pytest -q -p no:cacheprovider -p verify722.gcstat --durations=8 -o faulthandler_timeout=240 $FILES | grep -E "gcstat|passed|failed|s call|s setup" || true
+              e=$(date +%s.%N)
+              echo "=== round $r python $v tests wall $(python3 -c "print(round($e-$s,1))") s"
+            done
+          done
