@@ -1,0 +1,27 @@
+name: verify-722-e2e
+on: {push: {branches: [verify/722-e2e]}, workflow_dispatch: {}}
+jobs:
+  trace:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.12"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with: {python-version: "${{ matrix.python }}"}
+      - run: python -m pip install -e ".[dev]"
+      - name: trace e2e.sh (cold docker cache, as in CI)
+        run: |
+          docker events --format '{{.Time}} {{.Type}} {{.Action}} {{.Actor.Attributes.name}}' > "$RUNNER_TEMP/events.log" &
+          sed 's/build -q/build --progress=plain/' deploy/compose/e2e.sh > deploy/compose/e2e_trace.sh
+          PYTHON="$(which python)" sh -x deploy/compose/e2e_trace.sh 2>&1 | python -u -c "
+          import sys,time
+          for l in sys.stdin: print(f'{time.time():.2f} {l}', end='', flush=True)"
+          kill %1 || true
+          echo ==== events; cat "$RUNNER_TEMP/events.log"
+      - name: the test itself, warm cache, 2 runs
+        run: |
+          for i in 1 2; do python -m pytest -v --durations=0 tests/test_compose.py::EndToEnd 2>&1 | grep -E 'call|passed|failed'; done
