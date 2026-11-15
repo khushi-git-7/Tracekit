@@ -1,0 +1,44 @@
+name: rec-codex-img
+on:
+  push:
+    branches: [verify/codex-img-record]
+permissions:
+  contents: read
+jobs:
+  record:
+    name: record Codex view_image and agent tool hook payloads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: install Codex CLI (npm, latest)
+        run: |
+          npm install -g @openai/codex@latest
+          npm ls -g @openai/codex
+          codex --version
+      - name: help and features
+        run: |
+          codex exec --help | head -80
+          codex features list 2>&1 | tee "$RUNNER_TEMP/features.txt" || true
+      - name: record
+        env:
+          OUT: ${{ runner.temp }}/reccodex
+        run: |
+          set -x
+          ENABLE=()
+          for f in $(awk '{print $1}' "$RUNNER_TEMP/features.txt" | grep -Ei 'hook|multi_agent|collab|view_image|agent' || true); do
+            ENABLE+=(-c "features.$f=true")
+          done
+          echo "enabling: ${ENABLE[*]}"
+          .github/reccodex/run.sh full 8721 full "${ENABLE[@]}"
+          .github/reccodex/run.sh min 8722 min "${ENABLE[@]}"
+          .github/reccodex/run.sh defaults 8723 min
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: reccodex
+          path: ${{ runner.temp }}/reccodex
