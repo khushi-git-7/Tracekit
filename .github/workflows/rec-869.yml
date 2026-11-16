@@ -39,7 +39,16 @@ jobs:
       - name: record
         run: |
           mkdir -p "$OUT" "$WORK" ~/.qwen
-          printf '%s\n' '{"selectedAuthType":"openai","security":{"auth":{"selectedType":"openai"}},"model":{"name":"rec-model"}}' > ~/.qwen/settings.json
+          export HOOK_LOG="$OUT/hooks.jsonl"; echo "HOOK_LOG=$HOOK_LOG" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json, os
+          hook = lambda ev: {"type": "command", "name": "rec869", "timeout": 30000,
+                             "command": f"python3 {os.getcwd()}/.github/rec869/hook.py {ev}"}
+          s = {"selectedAuthType": "openai", "security": {"auth": {"selectedType": "openai"}}, "model": {"name": "rec-model"},
+               "hooks": {ev: [{"matcher": "*", "hooks": [hook(ev)]}] for ev in ("PreToolUse", "PostToolUse", "PostToolUseFailure")}}
+          json.dump(s, open(os.path.expanduser("~/.qwen/settings.json"), "w"), indent=1)
+          PY
+          cat ~/.qwen/settings.json
           touch "$RUNNER_TEMP/marker"; sleep 1
           chmod +x .github/rec869/run.sh
           # round 1: a new session, write, read, edit and a shell command
@@ -57,6 +66,27 @@ jobs:
             echo "--- $v=$H: session files:"; find "$H" -name '*.jsonl' -path '*chats*' | head
           done
           echo "--- session files under ~/.qwen now:"; find ~/.qwen -name '*.jsonl' -path '*chats*'
+      - name: which calls reached PreToolUse (hook log) against the session files
+        run: |
+          python3 - <<'PY'
+          import glob, json, os
+          hooks = [json.loads(l) for l in open(os.environ["HOOK_LOG"])] if os.path.exists(os.environ["HOOK_LOG"]) else []
+          print(len(hooks), "hook payloads; keys of the first:", sorted(hooks[0]["payload"]) if hooks else None)
+          for h in hooks:
+              p = h["payload"]
+              print(h["argv"], p.get("hook_event_name"), p.get("tool_use_id"), p.get("tool_name"),
+                    json.dumps(p.get("tool_input"))[:100], "| session", p.get("session_id"),
+                    "| other keys:", sorted(set(p) - {"hook_event_name", "tool_use_id", "tool_name", "tool_input",
+                                                      "session_id", "tool_response", "transcript_path", "cwd"}))
+          pre = {h["payload"].get("tool_use_id") for h in hooks if h["payload"].get("hook_event_name") == "PreToolUse"}
+          for f in glob.glob(os.path.expanduser("~/.qwen/projects/*/chats/*.jsonl")):
+              for e in map(json.loads, open(f)):
+                  u = (e.get("systemPayload") or {}).get("uiEvent") or {}
+                  if u.get("event.name") == "qwen-code.tool_call":
+                      print(os.path.basename(f), u["call_id"], u["function_name"], u.get("status"), "prompt", u.get("prompt_id"),
+                            "-> PreToolUse saw it" if u["call_id"] in pre else "-> NO PreToolUse")
+          PY
+          echo "--- the first PreToolUse payload in full"; head -1 "$HOOK_LOG" | head -c 3000
       - name: the files the sessions wrote
         run: |
           echo "--- every file under ~ written by the runs (not node_modules, npm or caches)"
