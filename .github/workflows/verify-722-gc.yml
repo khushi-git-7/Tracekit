@@ -1,0 +1,42 @@
+name: verify-722-gc
+on:
+  push:
+    branches: [verify/722-gc]
+jobs:
+  py312-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 3
+      - name: Fetch the release tags
+        run: git fetch --no-tags --depth=1 https://github.com/Cygnux-Labs/Tracekit.git "+refs/tags/v*:refs/tags/v*"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          nproc; grep -m1 "model name" /proc/cpuinfo; python -VV
+          python -m pip install -e ".[dev]"
+      - name: Whole suite, before and after, on this runner
+        run: |
+          git show HEAD~2:tests/conftest.py > /tmp/before.py   # main's conftest
+          git show HEAD~1:tests/conftest.py > /tmp/after.py    # the PR's conftest
+          run() {   # $1 before|after, $2 round
+            cp /tmp/$1.py tests/conftest.py
+            s=$(date +%s)
+            python -m pytest -v -o faulthandler_timeout=240 -p no:cacheprovider > /tmp/log-$2-$1.txt 2>&1 || true
+            e=$(date +%s)
+            echo "=== round $2 $1: wall $((e-s)) s; $(tail -1 /tmp/log-$2-$1.txt)"
+          }
+          run before 1; run after 2; run after 3; run before 4
+          git checkout tests/conftest.py
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: logs
+          path: /tmp/log-*.txt
